@@ -1,0 +1,1779 @@
+openapi: 3.0.3
+info:
+  title: Blair API
+  version: "1.0.0"
+  description: |
+    Blair is a self-hosted task and notes app. The web app is one client of
+    this API; scripts, agents, and future native apps use the same endpoints.
+
+    ## Getting started
+
+    1. In Blair, open **Settings → API tokens** and create a token with the
+       scopes you need. It is shown once and looks like `blair_pat_…`.
+    2. Send it as a bearer token:
+
+    ```sh
+    curl -H "Authorization: Bearer $BLAIR_TOKEN" https://blair.example.com/api/v1/tasks?inbox=true
+    ```
+
+    3. Create a task with the same quick-add syntax as the app:
+
+    ```sh
+    curl -X POST -H "Authorization: Bearer $BLAIR_TOKEN" -H 'Content-Type: application/json' \
+      -d '{"quick_add":"Fix gutter #homelab !high fri at 9am @house"}' \
+      https://blair.example.com/api/v1/tasks
+    ```
+
+    ## Conventions
+
+    - JSON only, `snake_case`, UTC RFC 3339 timestamps. `due_date`/`due_time`
+      are local to the user's timezone.
+    - **PATCH** uses JSON Merge Patch: omitted = unchanged, `null` = clear.
+    - Unknown request fields are rejected (`400 invalid_json`), so typos fail loudly.
+    - Errors are RFC 9457 `application/problem+json` with a stable `type`
+      (`urn:blair:problem:<code>`) and, for validation, per-field `errors`.
+    - Single resources carry `ETag: "v<version>"`. Send `If-Match` on PATCH to
+      avoid overwriting someone else's change (`412` returns the current copy).
+    - Creates accept a client-generated UUID `id`. Re-sending the same create
+      returns `200` with the existing resource, so retries are safe.
+    - Lists return `{ "data": [...] }`; task lists are paginated with
+      `next_cursor`.
+    - Cookie-authenticated (browser) unsafe requests must send
+      `X-Requested-With: blair`. Bearer requests don't need it.
+
+    ## Kanban columns and status
+
+    Each project has ordered columns; each column maps to a status
+    (`todo`, `doing`, `waiting`, `done`, `cancelled`). Moving a task to a column
+    sets its status. Setting a status moves the task to the first column with
+    that status (or keeps its column if none matches). Inbox tasks
+    (`project_id: null`) have no column.
+
+    ## Migrating into Blair (for scripts and agents)
+
+    There are no built-in importers. Use `POST /batch`:
+
+    1. Export from the source app.
+    2. Map each record to a Blair op. Use `upsert` with
+       `external_source` + `external_id` (e.g. `vikunja` / `412`) so re-runs
+       update instead of duplicating.
+    3. Send `?dry_run=true` first and fix any per-op `error`.
+    4. Send for real. It is one transaction, so it is all-or-nothing.
+    5. Verify with `GET /tasks?external_source=vikunja`.
+
+    History is writable: `created_at`, `status`, and `completed_at` are kept as
+    given. Ops can reference earlier ops with `ref` / `project_ref` /
+    `column_ref`, and tasks accept `project_name`, `column_name` and
+    `label_names` (+ `create_missing: true`).
+
+    | Source | Status mapping | Priority mapping |
+    |---|---|---|
+    | Vikunja | `done: true` → `done`; done bucket → done column | 1–5 → 1,1,2,3,4 |
+    | tududi | not_started→todo, in_progress→doing, waiting→waiting, done/archived→done, cancelled→cancelled | low/medium/high → 1/2/3 |
+    | Todoist | checked → done | p4..p1 → 0..3 (inverted) |
+    | TickTick | status 2 → done, -1 → cancelled | 0/1/3/5 → 0/1/2/3 |
+    | Obsidian Tasks | `[x]` → done (`✅ date` → completed_at) | ⏬🔽🔼⏫🔺 → 0/1/2/3/4 |
+servers:
+  - url: /api/v1
+tags:
+  - name: Auth
+    description: Sign-in, setup and registration. Browser sessions use an HttpOnly cookie.
+  - name: Account
+    description: Your profile, password, 2FA, sessions, API tokens and audit log. Browser session only (except `GET /me`).
+  - name: Projects
+  - name: Tasks
+  - name: Labels
+  - name: Notes
+  - name: Bulk
+    description: Batch writes and export for migrations and backups.
+  - name: Admin
+    description: User and invite management. Admin browser session only; tokens are never accepted.
+security:
+  - bearer: []
+  - session: []
+paths:
+  /auth/status:
+    get:
+      tags: [Auth]
+      operationId: authStatus
+      summary: Session and setup status
+      description: Public. Tells the client whether setup is needed and who is signed in.
+      security: []
+      responses:
+        "200":
+          description: Status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthStatus" }
+  /auth/setup:
+    post:
+      tags: [Auth]
+      operationId: setup
+      summary: Create the first (admin) account
+      description: Uses the one-time token the server logs on first start. Signs the new admin in.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/NewUser"
+                - type: object
+                  required: [token]
+                  properties:
+                    token: { type: string }
+      responses:
+        "201":
+          description: Admin created and signed in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /auth/register:
+    post:
+      tags: [Auth]
+      operationId: register
+      summary: Register with an invite (or openly, if enabled)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/NewUser"
+                - type: object
+                  properties:
+                    invite_token: { type: string }
+      responses:
+        "201":
+          description: Account created and signed in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Sign in with email and password
+      description: |
+        If 2FA is on, the response is `{"mfa_required": true}` with a 5-minute
+        pre-auth cookie; finish with `POST /auth/login/mfa`. Errors never reveal
+        whether an email exists. Rate limited per IP and per account.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        "200":
+          description: Signed in, or second factor required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /auth/login/mfa:
+    post:
+      tags: [Auth]
+      operationId: loginMFA
+      summary: Finish sign-in with a TOTP or recovery code
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code: { type: string, example: "123456" }
+                recovery_code: { type: string, example: "k7f3-9qzt-2mxa" }
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: Sign out this browser session
+      responses:
+        "204": { description: Signed out }
+  /me:
+    get:
+      tags: [Account]
+      operationId: getMe
+      summary: Your profile
+      x-scopes: [account:read]
+      responses:
+        "200":
+          description: Profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [Account]
+      operationId: patchMe
+      summary: Update profile and settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                display_name: { type: string, maxLength: 100 }
+                timezone: { type: string, example: America/New_York }
+                week_start: { type: string, enum: [monday, sunday] }
+                settings: { type: object, description: "Client settings (theme, default view…), max 8 KB" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "422": { $ref: "#/components/responses/Validation" }
+    delete:
+      tags: [Account]
+      operationId: deleteMe
+      summary: Delete your account and all data
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PasswordConfirm" }
+      responses:
+        "204": { description: Deleted }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Validation" }
+  /me/password:
+    post:
+      tags: [Account]
+      operationId: changePassword
+      summary: Change password (signs out other sessions)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string }
+                new_password: { type: string, minLength: 12, maxLength: 256 }
+      responses:
+        "204": { description: Changed }
+        "422": { $ref: "#/components/responses/Validation" }
+  /me/2fa/totp:
+    post:
+      tags: [Account]
+      operationId: beginTOTP
+      summary: Start TOTP enrollment
+      description: Returns a secret and `otpauth://` URI for a QR code. 2FA is not on until confirmed.
+      responses:
+        "200":
+          description: Enrollment secret
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TOTPSetup" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [Account]
+      operationId: disableTOTP
+      summary: Turn off 2FA
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PasswordConfirm" }
+      responses:
+        "204": { description: 2FA off }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Validation" }
+  /me/2fa/totp/confirm:
+    post:
+      tags: [Account]
+      operationId: confirmTOTP
+      summary: Confirm enrollment with a code; returns recovery codes (shown once)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, example: "123456" }
+      responses:
+        "200":
+          description: 2FA on
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecoveryCodes" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Validation" }
+  /me/2fa/recovery-codes:
+    post:
+      tags: [Account]
+      operationId: regenerateRecoveryCodes
+      summary: Replace recovery codes (old ones stop working)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string }
+      responses:
+        "200":
+          description: New codes
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecoveryCodes" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Validation" }
+  /me/sessions:
+    get:
+      tags: [Account]
+      operationId: listSessions
+      summary: Signed-in browser sessions
+      responses:
+        "200":
+          description: Sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Session" } }
+    delete:
+      tags: [Account]
+      operationId: revokeOtherSessions
+      summary: Sign out everywhere else
+      responses:
+        "204": { description: Done }
+  /me/sessions/{id}:
+    parameters: [{ $ref: "#/components/parameters/ID" }]
+    delete:
+      tags: [Account]
+      operationId: deleteSession
+      summary: Revoke one session
+      responses:
+        "204": { description: Revoked }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /me/tokens:
+    get:
+      tags: [Account]
+      operationId: listTokens
+      summary: Personal access tokens
+      responses:
+        "200":
+          description: Tokens (secrets are never shown again)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/APIToken" } }
+    post:
+      tags: [Account]
+      operationId: createToken
+      summary: Create a token (the secret is in the response once)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, scopes]
+              properties:
+                name: { type: string, maxLength: 100, example: migration agent }
+                scopes:
+                  type: array
+                  items: { $ref: "#/components/schemas/Scope" }
+                  example: [tasks:read, tasks:write]
+                expires_at: { type: string, format: date-time, nullable: true }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/APIToken" }
+        "422": { $ref: "#/components/responses/Validation" }
+  /me/tokens/{id}:
+    parameters: [{ $ref: "#/components/parameters/ID" }]
+    delete:
+      tags: [Account]
+      operationId: deleteToken
+      summary: Revoke a token
+      responses:
+        "204": { description: Revoked }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /me/audit:
+    get:
+      tags: [Account]
+      operationId: listAudit
+      summary: Security events for your account (latest 100)
+      responses:
+        "200":
+          description: Events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AuditEvent" } }
+
+  /projects:
+    get:
+      tags: [Projects]
+      operationId: listProjects
+      summary: List projects with their columns
+      x-scopes: [tasks:read]
+      parameters:
+        - { name: include_archived, in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          description: Projects in sidebar order
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Project" } }
+    post:
+      tags: [Projects]
+      operationId: createProject
+      summary: Create a project
+      description: Without `columns`, the project gets To do / Doing / Done. Custom columns need at least one `todo` and one `done`.
+      x-scopes: [tasks:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProjectCreate" }
+            example: { name: Homelab, color: "#2E9E6A" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Validation" }
+  /projects/{id}:
+    parameters: [{ $ref: "#/components/parameters/ID" }]
+    get:
+      tags: [Projects]
+      operationId: getProject
+      summary: Get a project
+      x-scopes: [tasks:read]
+      responses:
+        "200":
+          description: Project
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Projects]
+      operationId: patchProject
+      summary: Update, archive or reorder a project
+      x-scopes: [tasks:write]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProjectPatch" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "422": { $ref: "#/components/responses/Validation" }
+    delete:
+      tags: [Projects]
+      operationId: deleteProject
+      summary: Delete a project and its tasks (notes are kept, unlinked)
+      x-scopes: [tasks:write]
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /projects/{id}/columns:
+    parameters: [{ $ref: "#/components/parameters/ID" }]
+    post:
+      tags: [Projects]
+      operationId: createColumn
+      summary: Add a kanban column
+      x-scopes: [tasks:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ColumnCreate" }
+            example: { name: Waiting on someone, status: waiting }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Column" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+  /columns/{id}:
+    parameters: [{ $ref: "#/components/parameters/ID" }]
+    patch:
+      tags: [Projects]
+      operationId: patchColumn
+      summary: Rename, re-status, limit or reorder a column
+      description: Changing a column's status changes the status of every task in it.
+      x-scopes: [tasks:write]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ColumnPatch" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Column" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "422": { $ref: "#/components/responses/Validation" }
+    delete:
+      tags: [Projects]
+      operationId: deleteColumn
+      summary: Delete a column
+      description: A column with tasks needs `move_tasks_to`. The last `todo` or `done` column can't be deleted (409).
+      x-scopes: [tasks:write]
+      parameters:
+        - { name: move_tasks_to, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Validation" }
+
+  /tasks:
+    get:
+      tags: [Tasks]
+      operationId: listTasks
+      summary: List and filter tasks
+      description: |
+        Common views:
+        - Inbox: `inbox=true&status=todo,doing,waiting`
+        - Today: `due_to=<today>&status=todo,doing,waiting&sort=due`
+        - Logbook: `status=done,cancelled&sort=completed`
+        - Trash: `deleted=true`
+        - Recently added: `created_since=<7 days ago>&sort=created`
+      x-scopes: [tasks:read]
+      parameters:
+        - { name: inbox, in: query, schema: { type: boolean }, description: Only tasks without a project }
+        - { name: project_id, in: query, schema: { type: string, format: uuid } }
+        - { name: column_id, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string }, description: Comma-separated statuses, example: "todo,doing" }
+        - { name: label_id, in: query, schema: { type: string, format: uuid } }
+        - { name: due_from, in: query, schema: { type: string, format: date } }
+        - { name: due_to, in: query, schema: { type: string, format: date } }
+        - { name: has_due, in: query, schema: { type: boolean } }
+        - { name: overdue, in: query, schema: { type: boolean } }
+        - { name: q, in: query, schema: { type: string }, description: Full-text search over title and description }
+        - { name: deleted, in: query, schema: { type: boolean }, description: Trash instead of live tasks }
+        - { name: created_since, in: query, schema: { type: string, format: date-time } }
+        - { name: updated_since, in: query, schema: { type: string, format: date-time } }
+        - { name: external_source, in: query, schema: { type: string } }
+        - { name: sort, in: query, schema: { type: string, enum: [position, due, priority, created, updated, completed] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000, default: 200 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: A page of tasks
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskPage" }
+        "422": { $ref: "#/components/responses/Validation" }
+    post:
+      tags: [Tasks]
+      operationId: createTask
+      summary: Create a task (optionally from quick-add text)
+      description: |
+        `quick_add` uses the app's syntax: `#project`, `/column`, `@label`,
+        `!1`–`!4` / `!high`, and natural dates (`tomorrow`, `fri at 9am`,
+        `in 3 days`, `2027-06-03`). Explicit fields override parsed ones.
+        Unknown project or label names fail with 422 unless
+        `create_missing: true`. The response includes `parsed` tokens.
+      x-scopes: [tasks:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TaskCreate" }
+            examples:
+              quickAdd:
+                summary: Quick-add text
+                value: { quick_add: "Fix gutter #homelab /doing !high fri at 9am @house" }
+              explicit:
+                summary: Explicit fields
+                value: { title: "Renew wildcard cert", priority: 3, due_date: "2026-12-01", project_name: Homelab }
+      responses:
+        "201":
+          description: Created
+          headers:
+            Location: { schema: { type: string } }
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskCreated" }
+        "200":
+          description: Idempotent replay of a create with the same id
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskCreated" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Validation" }
+  /tasks/{id}:
+    parameters: [{ $ref: "#/components/parameters/ID" }]
+    get:
+      tags: [Tasks]
+      operationId: getTask
+      summary: Get a task
+      x-scopes: [tasks:read]
+      responses:
+        "200":
+          description: Task
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Tasks]
+      operationId: patchTask
+      summary: Update a task
+      description: Column and status follow the kanban rules (see top of this document).
+      x-scopes: [tasks:write]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TaskPatch" }
+            example: { status: done }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "422": { $ref: "#/components/responses/Validation" }
+    delete:
+      tags: [Tasks]
+      operationId: deleteTask
+      summary: Move to trash (or delete forever with permanent=true)
+      x-scopes: [tasks:write]
+      parameters:
+        - { name: permanent, in: query, schema: { type: boolean } }
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /tasks/{id}/move:
+    parameters: [{ $ref: "#/components/parameters/ID" }]
+    post:
+      tags: [Tasks]
+      operationId: moveTask
+      summary: Move a task (drag and drop)
+      description: Set the target project/column and place the task before or after a neighbour. Omit both neighbours to append.
+      x-scopes: [tasks:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                project_id: { type: string, format: uuid, nullable: true }
+                column_id: { type: string, format: uuid, nullable: true }
+                before_id: { type: string, format: uuid }
+                after_id: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Moved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+  /tasks/{id}/restore:
+    parameters: [{ $ref: "#/components/parameters/ID" }]
+    post:
+      tags: [Tasks]
+      operationId: restoreTask
+      summary: Restore from trash
+      x-scopes: [tasks:write]
+      responses:
+        "200":
+          description: Restored
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /tasks/{id}/checklist:
+    parameters: [{ $ref: "#/components/parameters/ID" }]
+    get:
+      tags: [Tasks]
+      operationId: listChecklist
+      summary: Checklist (subtasks)
+      x-scopes: [tasks:read]
+      responses:
+        "200":
+          description: Items in order
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/ChecklistItem" } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [Tasks]
+      operationId: createChecklistItem
+      summary: Add a checklist item
+      x-scopes: [tasks:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                id: { type: string, format: uuid }
+                text: { type: string, maxLength: 500 }
+                done: { type: boolean }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChecklistItem" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+  /checklist/{id}:
+    parameters: [{ $ref: "#/components/parameters/ID" }]
+    patch:
+      tags: [Tasks]
+      operationId: patchChecklistItem
+      summary: Edit, tick or reorder a checklist item
+      x-scopes: [tasks:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text: { type: string, maxLength: 500 }
+                done: { type: boolean }
+                after_id: { type: string, format: uuid, nullable: true }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChecklistItem" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+    delete:
+      tags: [Tasks]
+      operationId: deleteChecklistItem
+      summary: Delete a checklist item
+      x-scopes: [tasks:write]
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /labels:
+    get:
+      tags: [Labels]
+      operationId: listLabels
+      summary: List labels
+      x-scopes: [tasks:read]
+      responses:
+        "200":
+          description: Labels by name
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Label" } }
+    post:
+      tags: [Labels]
+      operationId: createLabel
+      summary: Create a label
+      x-scopes: [tasks:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LabelCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Label" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Validation" }
+  /labels/{id}:
+    parameters: [{ $ref: "#/components/parameters/ID" }]
+    patch:
+      tags: [Labels]
+      operationId: patchLabel
+      summary: Rename or recolour a label
+      x-scopes: [tasks:write]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                color: { type: string }
+                external_source: { type: string, nullable: true }
+                external_id: { type: string, nullable: true }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Label" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Validation" }
+    delete:
+      tags: [Labels]
+      operationId: deleteLabel
+      summary: Delete a label (removes it from tasks)
+      x-scopes: [tasks:write]
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /notes:
+    get:
+      tags: [Notes]
+      operationId: listNotes
+      summary: List notes (pinned first, then recently updated)
+      x-scopes: [notes:read]
+      parameters:
+        - { name: project_id, in: query, schema: { type: string, format: uuid } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: deleted, in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          description: Notes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Note" } }
+    post:
+      tags: [Notes]
+      operationId: createNote
+      summary: Create a note
+      x-scopes: [notes:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NoteCreate" }
+            example: { body: "Idea: show quick-add syntax hints in the empty Inbox" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Note" }
+        "200":
+          description: Idempotent replay
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Note" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Validation" }
+  /notes/{id}:
+    parameters: [{ $ref: "#/components/parameters/ID" }]
+    get:
+      tags: [Notes]
+      operationId: getNote
+      summary: Get a note
+      x-scopes: [notes:read]
+      responses:
+        "200":
+          description: Note
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Note" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Notes]
+      operationId: patchNote
+      summary: Update a note
+      x-scopes: [notes:write]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NotePatch" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Note" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "422": { $ref: "#/components/responses/Validation" }
+    delete:
+      tags: [Notes]
+      operationId: deleteNote
+      summary: Move to trash (or delete forever with permanent=true)
+      x-scopes: [notes:write]
+      parameters:
+        - { name: permanent, in: query, schema: { type: boolean } }
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /notes/{id}/restore:
+    parameters: [{ $ref: "#/components/parameters/ID" }]
+    post:
+      tags: [Notes]
+      operationId: restoreNote
+      summary: Restore from trash
+      x-scopes: [notes:write]
+      responses:
+        "200":
+          description: Restored
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Note" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /notes/{id}/convert:
+    parameters: [{ $ref: "#/components/parameters/ID" }]
+    post:
+      tags: [Notes]
+      operationId: convertNote
+      summary: Turn a note into a task
+      description: Title is the note title or its first line; the rest becomes the description.
+      x-scopes: [notes:write, tasks:write]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                delete_note: { type: boolean, default: false }
+      responses:
+        "201":
+          description: The new task
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /search:
+    get:
+      tags: [Tasks]
+      operationId: search
+      summary: Full-text search across tasks and notes
+      x-scopes: [tasks:read]
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Hits by relevance
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/SearchHit" } }
+  /quick-add/parse:
+    post:
+      tags: [Tasks]
+      operationId: parseQuickAdd
+      summary: Parse quick-add text without creating anything
+      x-scopes: [tasks:read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string, example: "Call dentist tomorrow 9am #life" }
+                context_project_id: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Parse result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QuickAddResult" }
+
+  /batch:
+    post:
+      tags: [Bulk]
+      operationId: batch
+      summary: Apply up to 1000 create/upsert/update/delete ops in one transaction
+      description: |
+        All ops succeed or none are kept. A failed batch returns 422 with
+        per-op `error`s (other ops show their would-be result). Use
+        `?dry_run=true` to validate without writing.
+
+        Types: `project`, `column`, `label`, `task`, `note`. `data` is the same
+        object as the matching create/PATCH endpoint, plus:
+        - `project_ref` / `column_ref`: the `ref` of an earlier op
+        - `upsert`: matches on `data.external_source` + `data.external_id`
+
+        Note ops also need the `notes:write` scope.
+      x-scopes: [tasks:write]
+      parameters:
+        - { name: dry_run, in: query, schema: { type: boolean } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ops]
+              properties:
+                ops:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items: { $ref: "#/components/schemas/BatchOp" }
+            example:
+              ops:
+                - { op: upsert, type: project, ref: p1, data: { name: Homelab, external_source: vikunja, external_id: "3" } }
+                - op: upsert
+                  type: task
+                  data:
+                    title: Back up caddy/data
+                    project_ref: p1
+                    status: done
+                    created_at: "2025-01-01T08:00:00Z"
+                    completed_at: "2025-03-01T12:00:00Z"
+                    label_names: [ops]
+                    create_missing: true
+                    external_source: vikunja
+                    external_id: "412"
+      responses:
+        "200":
+          description: Applied (or validated, for dry runs)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BatchResponse" }
+        "422":
+          description: At least one op failed; nothing was written
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BatchResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+  /export:
+    get:
+      tags: [Bulk]
+      operationId: export
+      summary: Export your whole account
+      description: "`json` is `blair.export.v1` (everything, including completed and trashed). `csv` is one row per task."
+      x-scopes: [export]
+      parameters:
+        - { name: format, in: query, schema: { type: string, enum: [json, csv], default: json } }
+      responses:
+        "200":
+          description: Export file
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Export" }
+            text/csv:
+              schema: { type: string }
+
+  /admin/users:
+    get:
+      tags: [Admin]
+      operationId: adminListUsers
+      summary: List users
+      responses:
+        "200":
+          description: Users
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/User" } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Admin]
+      operationId: adminCreateUser
+      summary: Create a user directly
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/NewUser"
+                - type: object
+                  properties:
+                    is_admin: { type: boolean }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Validation" }
+  /admin/users/{id}:
+    parameters: [{ $ref: "#/components/parameters/ID" }]
+    patch:
+      tags: [Admin]
+      operationId: adminPatchUser
+      summary: Disable, promote, reset 2FA or set a temporary password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                disabled: { type: boolean }
+                is_admin: { type: boolean }
+                reset_2fa: { type: boolean }
+                password: { type: string, description: Temporary password; the user must change it at next sign-in }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Validation" }
+    delete:
+      tags: [Admin]
+      operationId: adminDeleteUser
+      summary: Delete a user and all their data
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/invites:
+    get:
+      tags: [Admin]
+      operationId: adminListInvites
+      summary: List invites
+      responses:
+        "200":
+          description: Invites
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Invite" } }
+    post:
+      tags: [Admin]
+      operationId: adminCreateInvite
+      summary: Create a single-use invite (7 days)
+      description: Share `<base url>/register?invite=<token>`. Requires `BLAIR_REGISTRATION=invite`.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: { type: string, format: email, description: Lock the invite to this email }
+      responses:
+        "201":
+          description: Created; the token is shown once
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Invite" }
+        "422": { $ref: "#/components/responses/Validation" }
+  /admin/invites/{id}:
+    parameters: [{ $ref: "#/components/parameters/ID" }]
+    delete:
+      tags: [Admin]
+      operationId: adminDeleteInvite
+      summary: Revoke an invite
+      responses:
+        "204": { description: Revoked }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: "Personal access token (`blair_pat_…`). Scopes are listed per operation as `x-scopes`."
+    session:
+      type: apiKey
+      in: cookie
+      name: __Host-blair_session
+      description: "Browser session. Unsafe requests also need `X-Requested-With: blair`."
+  parameters:
+    ID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    IfMatch:
+      name: If-Match
+      in: header
+      description: 'ETag from a previous read, e.g. "v3". Mismatch returns 412.'
+      schema: { type: string }
+  responses:
+    BadRequest:
+      description: Malformed request
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Unauthorized:
+      description: Not signed in, bad credentials or bad token
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Forbidden:
+      description: Not allowed (scope, role, CSRF header or account gate)
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotFound:
+      description: Not found (or not yours)
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Conflict:
+      description: Conflicts with existing data or an invariant
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    PreconditionFailed:
+      description: If-Match version is stale; `current` holds the latest copy
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Validation:
+      description: Validation failed; see `errors`
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+          example:
+            type: urn:blair:problem:validation
+            title: Validation failed
+            status: 422
+            detail: "validation failed: title: title is required"
+            errors: [{ field: title, code: required, message: title is required }]
+    RateLimited:
+      description: Too many attempts; see Retry-After
+      headers:
+        Retry-After: { schema: { type: integer } }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+  schemas:
+    Status:
+      type: string
+      enum: [todo, doing, waiting, done, cancelled]
+    Scope:
+      type: string
+      enum: [tasks:read, tasks:write, notes:read, notes:write, export, account:read]
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, example: "urn:blair:problem:not_found" }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        errors:
+          type: array
+          items: { $ref: "#/components/schemas/FieldError" }
+        current: { description: Latest copy of the resource (412 only) }
+    FieldError:
+      type: object
+      required: [field, code, message]
+      properties:
+        field: { type: string }
+        code: { type: string }
+        message: { type: string }
+    NewUser:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 12, maxLength: 256, description: "At least 12 characters; common breached passwords are rejected" }
+        display_name: { type: string, maxLength: 100 }
+        timezone: { type: string, example: America/New_York }
+    User:
+      type: object
+      required: [id, email, display_name, timezone, week_start, is_admin, totp_enabled, must_change_password, disabled, settings, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string }
+        display_name: { type: string }
+        timezone: { type: string }
+        week_start: { type: string, enum: [monday, sunday] }
+        is_admin: { type: boolean }
+        totp_enabled: { type: boolean }
+        must_change_password: { type: boolean }
+        disabled: { type: boolean }
+        settings: { type: object }
+        created_at: { type: string, format: date-time }
+    Me:
+      allOf:
+        - $ref: "#/components/schemas/User"
+        - type: object
+          required: [recovery_codes_remaining]
+          properties:
+            recovery_codes_remaining: { type: integer }
+    AuthStatus:
+      type: object
+      required: [setup_required, registration, require_2fa, authenticated, mfa_pending, user, version]
+      properties:
+        setup_required: { type: boolean }
+        registration: { type: string, enum: [closed, invite, open] }
+        require_2fa: { type: boolean }
+        authenticated: { type: boolean }
+        mfa_pending: { type: boolean }
+        user:
+          allOf: [{ $ref: "#/components/schemas/User" }]
+          nullable: true
+        version: { type: string }
+    LoginResponse:
+      type: object
+      required: [mfa_required]
+      properties:
+        mfa_required: { type: boolean }
+        user: { $ref: "#/components/schemas/User" }
+    PasswordConfirm:
+      type: object
+      required: [password]
+      properties:
+        password: { type: string }
+        code: { type: string, description: Current TOTP code (when 2FA is on) }
+    TOTPSetup:
+      type: object
+      required: [secret, otpauth_uri]
+      properties:
+        secret: { type: string, example: JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP }
+        otpauth_uri: { type: string }
+    RecoveryCodes:
+      type: object
+      required: [recovery_codes]
+      properties:
+        recovery_codes:
+          type: array
+          items: { type: string }
+          example: [k7f3-9qzt-2mxa]
+    Session:
+      type: object
+      required: [id, ip, user_agent, created_at, last_seen_at, expires_at, current]
+      properties:
+        id: { type: string, format: uuid }
+        ip: { type: string }
+        user_agent: { type: string }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        current: { type: boolean }
+    APIToken:
+      type: object
+      required: [id, name, prefix, scopes, expires_at, last_used_at, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        prefix: { type: string, example: blair_pat_8fK2xQ }
+        scopes: { type: array, items: { $ref: "#/components/schemas/Scope" } }
+        expires_at: { type: string, format: date-time, nullable: true }
+        last_used_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        token: { type: string, description: The secret. Only present in the create response. }
+    AuditEvent:
+      type: object
+      required: [id, kind, ip, user_agent, detail, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, example: login.success }
+        ip: { type: string }
+        user_agent: { type: string }
+        detail: { type: object }
+        created_at: { type: string, format: date-time }
+    Invite:
+      type: object
+      required: [id, email, expires_at, used_at, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, nullable: true }
+        expires_at: { type: string, format: date-time }
+        used_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        token: { type: string, description: Only present in the create response }
+    External:
+      type: object
+      properties:
+        external_source: { type: string, nullable: true, maxLength: 50, example: vikunja }
+        external_id: { type: string, nullable: true, maxLength: 200, example: "412" }
+    Column:
+      type: object
+      required: [id, project_id, name, status, position, wip_limit, created_at, updated_at, version]
+      properties:
+        id: { type: string, format: uuid }
+        project_id: { type: string, format: uuid }
+        name: { type: string }
+        status: { $ref: "#/components/schemas/Status" }
+        position: { type: string, description: Fractional index; sort ascending }
+        wip_limit: { type: integer, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        version: { type: integer }
+    ColumnCreate:
+      type: object
+      required: [name, status]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, maxLength: 50 }
+        status: { $ref: "#/components/schemas/Status" }
+        wip_limit: { type: integer, minimum: 1, nullable: true }
+        after_id: { type: string, format: uuid, description: Insert after this column (default last) }
+    ColumnPatch:
+      type: object
+      properties:
+        name: { type: string, maxLength: 50 }
+        status: { $ref: "#/components/schemas/Status" }
+        wip_limit: { type: integer, minimum: 1, nullable: true }
+        after_id: { type: string, format: uuid, nullable: true, description: Reorder after this column; null = first }
+    Project:
+      type: object
+      required: [id, name, description, color, icon, default_view, position, archived_at, external_source, external_id, created_at, updated_at, version, columns, open_tasks]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        color: { type: string }
+        icon: { type: string }
+        default_view: { type: string, enum: [list, board] }
+        position: { type: string }
+        archived_at: { type: string, format: date-time, nullable: true }
+        external_source: { type: string, nullable: true }
+        external_id: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        version: { type: integer }
+        columns: { type: array, items: { $ref: "#/components/schemas/Column" } }
+        open_tasks: { type: integer }
+    ProjectCreate:
+      allOf:
+        - $ref: "#/components/schemas/External"
+        - type: object
+          required: [name]
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string, maxLength: 100 }
+            description: { type: string }
+            color: { type: string }
+            icon: { type: string }
+            default_view: { type: string, enum: [list, board] }
+            columns: { type: array, items: { $ref: "#/components/schemas/ColumnCreate" } }
+            created_at: { type: string, format: date-time }
+    ProjectPatch:
+      allOf:
+        - $ref: "#/components/schemas/External"
+        - type: object
+          properties:
+            name: { type: string, maxLength: 100 }
+            description: { type: string }
+            color: { type: string }
+            icon: { type: string }
+            default_view: { type: string, enum: [list, board] }
+            archived: { type: boolean }
+            after_id: { type: string, format: uuid, nullable: true, description: Reorder after this project; null = first }
+    Task:
+      type: object
+      required: [id, title, description, status, priority, project_id, column_id, due_date, due_time, labels, position, completed_at, deleted_at,
+        external_source, external_id, created_at, updated_at, version, checklist_total, checklist_done, is_overdue]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string, description: "Inline markdown (bold, italic, code, strike, links)" }
+        description: { type: string, description: GitHub-flavoured markdown }
+        status: { $ref: "#/components/schemas/Status" }
+        priority: { type: integer, minimum: 0, maximum: 4, description: "0 none, 1 low, 2 medium, 3 high, 4 urgent" }
+        project_id: { type: string, format: uuid, nullable: true, description: null = Inbox }
+        column_id: { type: string, format: uuid, nullable: true }
+        due_date: { type: string, format: date, nullable: true }
+        due_time: { type: string, nullable: true, example: "09:00" }
+        labels: { type: array, items: { type: string, format: uuid } }
+        position: { type: string }
+        completed_at: { type: string, format: date-time, nullable: true }
+        deleted_at: { type: string, format: date-time, nullable: true }
+        external_source: { type: string, nullable: true }
+        external_id: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        version: { type: integer }
+        checklist_total: { type: integer }
+        checklist_done: { type: integer }
+        is_overdue: { type: boolean }
+    TaskCreated:
+      allOf:
+        - $ref: "#/components/schemas/Task"
+        - type: object
+          properties:
+            parsed: { $ref: "#/components/schemas/QuickAddResult" }
+    TaskCreate:
+      allOf:
+        - $ref: "#/components/schemas/External"
+        - type: object
+          properties:
+            id: { type: string, format: uuid, description: Client-generated id for idempotent retries }
+            title: { type: string, maxLength: 500 }
+            quick_add: { type: string, description: Quick-add text; parsed fields fill anything not given explicitly }
+            description: { type: string }
+            status: { $ref: "#/components/schemas/Status" }
+            priority: { type: integer, minimum: 0, maximum: 4 }
+            project_id: { type: string, format: uuid, nullable: true }
+            project_name: { type: string, nullable: true }
+            column_id: { type: string, format: uuid, nullable: true }
+            column_name: { type: string, nullable: true }
+            due_date: { type: string, format: date, nullable: true }
+            due_time: { type: string, nullable: true }
+            labels: { type: array, items: { type: string, format: uuid } }
+            label_names: { type: array, items: { type: string } }
+            create_missing: { type: boolean, description: Create unknown projects/labels named in the request }
+            completed_at: { type: string, format: date-time, nullable: true }
+            created_at: { type: string, format: date-time, nullable: true }
+            context_project_id: { type: string, description: Project view the quick-add came from (resolves /column and defaults the project) }
+    TaskPatch:
+      allOf:
+        - $ref: "#/components/schemas/External"
+        - type: object
+          properties:
+            title: { type: string, maxLength: 500 }
+            description: { type: string }
+            status: { $ref: "#/components/schemas/Status" }
+            priority: { type: integer, minimum: 0, maximum: 4, nullable: true }
+            project_id: { type: string, format: uuid, nullable: true, description: null moves the task to the Inbox }
+            project_name: { type: string, nullable: true }
+            column_id: { type: string, format: uuid, nullable: true }
+            column_name: { type: string, nullable: true }
+            due_date: { type: string, format: date, nullable: true }
+            due_time: { type: string, nullable: true }
+            labels: { type: array, items: { type: string, format: uuid }, nullable: true }
+            label_names: { type: array, items: { type: string }, nullable: true }
+            create_missing: { type: boolean }
+            completed_at: { type: string, format: date-time, nullable: true }
+    TaskPage:
+      type: object
+      required: [data, next_cursor]
+      properties:
+        data: { type: array, items: { $ref: "#/components/schemas/Task" } }
+        next_cursor: { type: string, nullable: true }
+    ChecklistItem:
+      type: object
+      required: [id, task_id, text, done, position, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        task_id: { type: string, format: uuid }
+        text: { type: string }
+        done: { type: boolean }
+        position: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Label:
+      type: object
+      required: [id, name, color, external_source, external_id, created_at, updated_at, version]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        color: { type: string }
+        external_source: { type: string, nullable: true }
+        external_id: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        version: { type: integer }
+    LabelCreate:
+      allOf:
+        - $ref: "#/components/schemas/External"
+        - type: object
+          required: [name]
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string, maxLength: 50, description: No spaces }
+            color: { type: string }
+    Note:
+      type: object
+      required: [id, title, body, pinned, project_id, deleted_at, external_source, external_id, created_at, updated_at, version]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        body: { type: string, description: GitHub-flavoured markdown }
+        pinned: { type: boolean }
+        project_id: { type: string, format: uuid, nullable: true }
+        deleted_at: { type: string, format: date-time, nullable: true }
+        external_source: { type: string, nullable: true }
+        external_id: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        version: { type: integer }
+    NoteCreate:
+      allOf:
+        - $ref: "#/components/schemas/External"
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            title: { type: string, maxLength: 500 }
+            body: { type: string }
+            pinned: { type: boolean }
+            project_id: { type: string, format: uuid, nullable: true }
+            created_at: { type: string, format: date-time, nullable: true }
+    NotePatch:
+      allOf:
+        - $ref: "#/components/schemas/External"
+        - type: object
+          properties:
+            title: { type: string, maxLength: 500 }
+            body: { type: string }
+            pinned: { type: boolean }
+            project_id: { type: string, format: uuid, nullable: true }
+    SearchHit:
+      type: object
+      required: [kind, id, title, snippet]
+      properties:
+        kind: { type: string, enum: [task, note] }
+        id: { type: string, format: uuid }
+        title: { type: string }
+        snippet: { type: string }
+    QuickAddToken:
+      type: object
+      required: [kind, text, start, end, value]
+      properties:
+        kind: { type: string, enum: [project, column, label, priority, date] }
+        text: { type: string }
+        start: { type: integer, description: Byte offset into the input }
+        end: { type: integer }
+        value: { type: string }
+    QuickAddResult:
+      type: object
+      required: [title, tokens]
+      properties:
+        title: { type: string }
+        project: { type: string }
+        project_new: { type: string, description: Unknown project name (needs create_missing) }
+        column: { type: string }
+        priority: { type: integer }
+        due_date: { type: string, format: date }
+        due_time: { type: string }
+        labels: { type: array, items: { type: string } }
+        labels_new: { type: array, items: { type: string } }
+        tokens: { type: array, items: { $ref: "#/components/schemas/QuickAddToken" } }
+    BatchOp:
+      type: object
+      required: [op, type]
+      properties:
+        op: { type: string, enum: [create, upsert, update, delete] }
+        type: { type: string, enum: [project, column, label, task, note] }
+        ref: { type: string, description: Name this op so later ops can reference its id }
+        id: { type: string, format: uuid, description: Target for update/delete }
+        data: { type: object, description: "Same fields as the matching create/PATCH body, plus project_ref/column_ref" }
+    BatchResult:
+      type: object
+      required: [index, op, type, status]
+      properties:
+        index: { type: integer }
+        op: { type: string }
+        type: { type: string }
+        ref: { type: string }
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [created, updated, unchanged, deleted, error] }
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            fields: { type: array, items: { $ref: "#/components/schemas/FieldError" } }
+    BatchResponse:
+      type: object
+      required: [dry_run, committed, results]
+      properties:
+        dry_run: { type: boolean }
+        committed: { type: boolean }
+        results: { type: array, items: { $ref: "#/components/schemas/BatchResult" } }
+    Export:
+      type: object
+      required: [format, exported_at, user, projects, labels, tasks, notes]
+      properties:
+        format: { type: string, enum: [blair.export.v1] }
+        exported_at: { type: string, format: date-time }
+        user: { type: object }
+        projects: { type: array, items: { $ref: "#/components/schemas/Project" } }
+        labels: { type: array, items: { $ref: "#/components/schemas/Label" } }
+        tasks:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/Task"
+              - type: object
+                required: [checklist]
+                properties:
+                  checklist: { type: array, items: { $ref: "#/components/schemas/ChecklistItem" } }
+        notes: { type: array, items: { $ref: "#/components/schemas/Note" } }
