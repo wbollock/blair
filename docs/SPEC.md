@@ -306,7 +306,7 @@ This section has the strictest acceptance criteria in the spec.
 | `/name` | Column within the chosen/current project | `/doing` |
 | `@name` | Label (creates it if new, after confirmation) | `@errands` |
 | `!1`–`!4`, `!low` `!med` `!high` `!urgent` | Priority | `!high` |
-| Natural date | `today`, `tonight`, `tomorrow`/`tmr`, weekday names, `next fri`, `in 3 days`, `in 2w`, `jun 3`, `3 jun`, `6/3`, `2027-06-03`, optional `at 5pm` / `17:00` | `fri at 9am` |
+| Natural date | `today`, `tonight`, `tomorrow`/`tmr`, `yesterday`, weekday names, `next fri`, `in 3 days`, `in 2w`, `jun 3`, `3 jun`, `6/3`, `2027-06-03`, optional `at 5pm` / `17:00` | `fri at 9am` |
 | `due:` | Explicit date prefix when natural detection is ambiguous | `due:may 4` |
 | `\` | Escape the next token so it stays literal text | `\#1 fan` |
 
@@ -362,8 +362,8 @@ input, with an entrance animation that draws the eye.
   None).
 - **Changes from a chip apply instantly** (optimistic, with rollback on error)
   and update the card in place. The card stays in the tray until dismissed.
-- The tray keeps the **last 5** tasks created in this tab session. Older ones
-  collapse into "＋N more · View recently added". The tray clears on reload or
+- The tray shows the **last 3** tasks created in this tab session (it keeps up
+  to 8). Older ones collapse into "＋N more · View recently added". The tray clears on reload or
   when you dismiss it (×). The tasks themselves are unaffected.
 - A **toast** confirms each add with **Open** and **Undo** (Undo deletes it
   outright; available 8 s).

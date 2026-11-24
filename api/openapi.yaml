@@ -243,7 +243,7 @@ paths:
                 display_name: { type: string, maxLength: 100 }
                 timezone: { type: string, example: America/New_York }
                 week_start: { type: string, enum: [monday, sunday] }
-                settings: { type: object, description: "Client settings (theme, default view…), max 8 KB" }
+                settings: { type: object, additionalProperties: true, description: "Client settings (theme, default view…), max 8 KB" }
       responses:
         "200":
           description: Updated
@@ -1377,7 +1377,7 @@ components:
         totp_enabled: { type: boolean }
         must_change_password: { type: boolean }
         disabled: { type: boolean }
-        settings: { type: object }
+        settings: { type: object, additionalProperties: true }
         created_at: { type: string, format: date-time }
     Me:
       allOf:
@@ -1456,7 +1456,7 @@ components:
         kind: { type: string, example: login.success }
         ip: { type: string }
         user_agent: { type: string }
-        detail: { type: object }
+        detail: { type: object, additionalProperties: true }
         created_at: { type: string, format: date-time }
     Invite:
       type: object
@@ -1719,6 +1719,7 @@ components:
         project: { type: string }
         project_new: { type: string, description: Unknown project name (needs create_missing) }
         column: { type: string }
+        column_new: { type: string, description: "/column for a project_new; resolved once that project is created" }
         priority: { type: integer }
         due_date: { type: string, format: date }
         due_time: { type: string }
@@ -1764,7 +1765,7 @@ components:
       properties:
         format: { type: string, enum: [blair.export.v1] }
         exported_at: { type: string, format: date-time }
-        user: { type: object }
+        user: { type: object, additionalProperties: true }
         projects: { type: array, items: { $ref: "#/components/schemas/Project" } }
         labels: { type: array, items: { $ref: "#/components/schemas/Label" } }
         tasks:

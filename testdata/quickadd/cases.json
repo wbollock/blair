@@ -5,17 +5,43 @@
     "tz": "America/New_York",
     "week_start": "monday",
     "projects": [
-      { "name": "Homelab", "columns": ["To do", "Doing", "Done"] },
-      { "name": "Home lab notes", "columns": ["To do", "Done"] },
-      { "name": "Work", "columns": ["Backlog", "Next", "Doing", "Done"] }
+      {
+        "name": "Homelab",
+        "columns": [
+          "To do",
+          "Doing",
+          "Done"
+        ]
+      },
+      {
+        "name": "Home lab notes",
+        "columns": [
+          "To do",
+          "Done"
+        ]
+      },
+      {
+        "name": "Work",
+        "columns": [
+          "Backlog",
+          "Next",
+          "Doing",
+          "Done"
+        ]
+      }
     ],
-    "labels": ["house", "errands"]
+    "labels": [
+      "house",
+      "errands"
+    ]
   },
   "cases": [
     {
       "name": "plain title",
       "input": "Buy milk",
-      "expect": { "title": "Buy milk" }
+      "expect": {
+        "title": "Buy milk"
+      }
     },
     {
       "name": "everything at once",
@@ -27,104 +53,181 @@
         "priority": 3,
         "due_date": "2026-11-27",
         "due_time": "09:00",
-        "labels": ["house"]
+        "labels": [
+          "house"
+        ]
       }
     },
     {
       "name": "quoted project with spaces",
       "input": "Write up VLAN plan #\"Home lab notes\"",
-      "expect": { "title": "Write up VLAN plan", "project": "Home lab notes" }
+      "expect": {
+        "title": "Write up VLAN plan",
+        "project": "Home lab notes"
+      }
     },
     {
       "name": "numeric priority",
       "input": "Pay rent !4",
-      "expect": { "title": "Pay rent", "priority": 4 }
+      "expect": {
+        "title": "Pay rent",
+        "priority": 4
+      }
     },
     {
       "name": "tomorrow",
       "input": "Call dentist tomorrow",
-      "expect": { "title": "Call dentist", "due_date": "2026-11-25" }
+      "expect": {
+        "title": "Call dentist",
+        "due_date": "2026-11-25"
+      }
+    },
+    {
+      "name": "yesterday (for logging overdue work)",
+      "input": "Back up caddy yesterday",
+      "expect": {
+        "title": "Back up caddy",
+        "due_date": "2026-11-23"
+      }
     },
     {
       "name": "tmr shorthand with 24h time",
       "input": "Standup notes tmr 17:00",
-      "expect": { "title": "Standup notes", "due_date": "2026-11-25", "due_time": "17:00" }
+      "expect": {
+        "title": "Standup notes",
+        "due_date": "2026-11-25",
+        "due_time": "17:00"
+      }
     },
     {
       "name": "bare weekday is next occurrence",
       "input": "Review PR tuesday",
-      "expect": { "title": "Review PR", "due_date": "2026-12-01" }
+      "expect": {
+        "title": "Review PR",
+        "due_date": "2026-12-01"
+      }
     },
     {
       "name": "next weekday",
       "input": "Plan sprint next fri",
-      "expect": { "title": "Plan sprint", "due_date": "2026-12-04" }
+      "expect": {
+        "title": "Plan sprint",
+        "due_date": "2026-12-04"
+      }
     },
     {
       "name": "relative days",
       "input": "Renew cert in 3 days",
-      "expect": { "title": "Renew cert", "due_date": "2026-11-27" }
+      "expect": {
+        "title": "Renew cert",
+        "due_date": "2026-11-27"
+      }
     },
     {
       "name": "relative weeks short",
       "input": "Check backups in 2w",
-      "expect": { "title": "Check backups", "due_date": "2026-12-08" }
+      "expect": {
+        "title": "Check backups",
+        "due_date": "2026-12-08"
+      }
     },
     {
       "name": "month day rolls to next year when past",
       "input": "Taxes mar 3",
-      "expect": { "title": "Taxes", "due_date": "2027-03-03" }
+      "expect": {
+        "title": "Taxes",
+        "due_date": "2027-03-03"
+      }
     },
     {
       "name": "iso date",
       "input": "Launch 2027-06-03",
-      "expect": { "title": "Launch", "due_date": "2027-06-03" }
+      "expect": {
+        "title": "Launch",
+        "due_date": "2027-06-03"
+      }
     },
     {
       "name": "tonight",
       "input": "Take out trash tonight",
-      "expect": { "title": "Take out trash", "due_date": "2026-11-24", "due_time": "20:00" }
+      "expect": {
+        "title": "Take out trash",
+        "due_date": "2026-11-24",
+        "due_time": "20:00"
+      }
     },
     {
       "name": "explicit due prefix",
       "input": "Read \"May December\" due:may 4",
-      "expect": { "title": "Read \"May December\"", "due_date": "2027-05-04" }
+      "expect": {
+        "title": "Read \"May December\"",
+        "due_date": "2027-05-04"
+      }
     },
     {
       "name": "escaped hash stays literal",
       "input": "Replace \\#1 fan",
-      "expect": { "title": "Replace #1 fan" }
+      "expect": {
+        "title": "Replace #1 fan"
+      }
     },
     {
       "name": "unknown project is kept as a pending-create token",
       "input": "Ship it #newproj",
-      "expect": { "title": "Ship it", "project_new": "newproj" }
+      "expect": {
+        "title": "Ship it",
+        "project_new": "newproj"
+      }
+    },
+    {
+      "name": "column for a not-yet-created project is kept pending",
+      "input": "Fix gutter #newproj /doing",
+      "expect": {
+        "title": "Fix gutter",
+        "project_new": "newproj",
+        "column_new": "doing"
+      }
     },
     {
       "name": "column without project resolves against current project only",
       "input": "Triage logs /next",
       "context_project": "Work",
-      "expect": { "title": "Triage logs", "project": "Work", "column": "Next" }
+      "expect": {
+        "title": "Triage logs",
+        "project": "Work",
+        "column": "Next"
+      }
     },
     {
       "name": "markdown in title is preserved",
       "input": "Read **this** `config.yml` @errands",
-      "expect": { "title": "Read **this** `config.yml`", "labels": ["errands"] }
+      "expect": {
+        "title": "Read **this** `config.yml`",
+        "labels": [
+          "errands"
+        ]
+      }
     },
     {
       "name": "hash inside a word is not a token",
       "input": "Fix C# build",
-      "expect": { "title": "Fix C# build" }
+      "expect": {
+        "title": "Fix C# build"
+      }
     },
     {
       "name": "email-like at sign is not a label",
       "input": "Email bob@example.com",
-      "expect": { "title": "Email bob@example.com" }
+      "expect": {
+        "title": "Email bob@example.com"
+      }
     },
     {
       "name": "only tokens yields empty title error",
       "input": "#homelab !high",
-      "expect": { "error": "empty_title" }
+      "expect": {
+        "error": "empty_title"
+      }
     }
   ]
 }

@@ -45,6 +45,7 @@ type Result struct {
 	Project    string   `json:"project,omitempty"`
 	ProjectNew string   `json:"project_new,omitempty"`
 	Column     string   `json:"column,omitempty"`
+	ColumnNew  string   `json:"column_new,omitempty"` // /column for a project_new, resolved after it is created
 	Priority   *int     `json:"priority,omitempty"`
 	DueDate    string   `json:"due_date,omitempty"`
 	DueTime    string   `json:"due_time,omitempty"`
@@ -241,6 +242,9 @@ func Parse(input string, ctx Context) (Result, error) {
 				res.Column = canon
 				tok("column", columnWord, columnWord, canon)
 			}
+		} else if res.ProjectNew != "" {
+			res.ColumnNew = words[columnWord].text[1:]
+			tok("column", columnWord, columnWord, res.ColumnNew)
 		}
 	}
 
@@ -341,6 +345,8 @@ func matchDate(ws []string, today time.Time, weekStart time.Weekday) (date, tm s
 		return fmtDate(today), "20:00", 1
 	case "tomorrow", "tmr", "tmrw":
 		return fmtDate(today.AddDate(0, 0, 1)), "", 1
+	case "yesterday":
+		return fmtDate(today.AddDate(0, 0, -1)), "", 1
 	}
 	if wd, ok := weekdays[w0]; ok {
 		diff := (int(wd) - int(today.Weekday()) + 7) % 7

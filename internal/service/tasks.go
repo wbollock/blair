@@ -346,8 +346,12 @@ func (s *Service) createTask(ctx context.Context, q querier, u *User, in TaskCre
 				in.ProjectID = &in.ContextProjectID
 			}
 		}
-		if in.ColumnID == nil && in.ColumnName == nil && r.Column != "" {
-			in.ColumnName = &r.Column
+		if in.ColumnID == nil && in.ColumnName == nil {
+			if r.Column != "" {
+				in.ColumnName = &r.Column
+			} else if r.ColumnNew != "" && in.CreateMissing {
+				in.ColumnName = &r.ColumnNew // resolved against the new project's columns
+			}
 		}
 		if in.Priority == nil && r.Priority != nil {
 			in.Priority = r.Priority

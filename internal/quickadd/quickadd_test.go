@@ -26,6 +26,7 @@ type vectorFile struct {
 			Project    string   `json:"project"`
 			ProjectNew string   `json:"project_new"`
 			Column     string   `json:"column"`
+			ColumnNew  string   `json:"column_new"`
 			Priority   *int     `json:"priority"`
 			DueDate    string   `json:"due_date"`
 			DueTime    string   `json:"due_time"`
@@ -84,6 +85,7 @@ func TestSharedVectors(t *testing.T) {
 			check("project", got.Project, c.Expect.Project)
 			check("project_new", got.ProjectNew, c.Expect.ProjectNew)
 			check("column", got.Column, c.Expect.Column)
+			check("column_new", got.ColumnNew, c.Expect.ColumnNew)
 			check("due_date", got.DueDate, c.Expect.DueDate)
 			check("due_time", got.DueTime, c.Expect.DueTime)
 			if (got.Priority == nil) != (c.Expect.Priority == nil) || (got.Priority != nil && *got.Priority != *c.Expect.Priority) {
