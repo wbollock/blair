@@ -10,7 +10,7 @@ COPY api/openapi.yaml /src/api/openapi.yaml
 COPY testdata/ /src/testdata/
 RUN npm run build
 
-FROM golang:1.27-bookworm AS go
+FROM golang:1.27.4-bookworm AS go
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

@@ -1,6 +1,6 @@
 # Toolchain pins. Run everything through mise so local and CI versions match.
 [tools]
-go = "1.27.3"
+go = "1.27.4"
 node = "24"
 
 [tasks.hooks]

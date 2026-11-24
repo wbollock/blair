@@ -3,6 +3,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: '17 6 * * 1'   # weekly, so new CVEs in unchanged deps still fail loudly
+permissions:
+  contents: read
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -12,9 +16,22 @@ jobs:
       - run: cd web && npm ci
       - run: mise run check
       - run: mise run build
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: jdx/mise-action@v2
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - name: npm audit
+        run: cd web && npm audit --audit-level=moderate
+      - name: gitleaks (full history)
+        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.24.3 git /repo --redact
   image:
     runs-on: ubuntu-latest
-    needs: check
+    needs: [check, security]
     steps:
       - uses: actions/checkout@v4
       - run: docker build --build-arg VERSION=${GITHUB_SHA::12} -t blair:ci .
