@@ -802,15 +802,39 @@ surprise reloads mid-typing).
 
 ## 13. Design system and UX quality bar
 
-- **Direction**: calm, typographic, quiet chrome. Think Things 3 restraint with
-  Linear-level precision. Content first. One accent colour (user-selectable),
-  neutral greys, semantic colours only for priority, overdue and status.
-  Generous whitespace on desktop. Compact density option.
-- **Tokens**: CSS custom properties for colour, spacing (4 px scale), radius,
-  shadow, motion, and typography. Light, dark, and follow-system themes.
-  Contrast meets WCAG 2.2 AA.
-- **Type**: a self-hosted variable sans for UI and a mono for code. No CDN
-  fonts (CSP and offline).
+- **Direction: "Paper"** (chosen 2026-11-24 from the style canvas). Warm and
+  minimal, close to Things 3: warm off-white and warm charcoal neutrals, one
+  terracotta accent, and semantic colours only for priority, overdue and
+  status. A serif for page titles, a sans for everything else. Generous
+  whitespace on desktop. A compact density option comes later.
+- **Themes**: the app has a theme setting of `system` (default; follows
+  `prefers-color-scheme` live), `light`, or `dark`. Every colour is a CSS
+  custom property, so a theme is a token set and nothing else. **"Soft"**
+  (friendly, colourful, pill chips, Manrope, 16 px radii) is the planned second
+  look. Components must not hard-code Paper-specific values, so adding Soft
+  means adding tokens only.
+- **Paper tokens** (source of truth: `web/src/lib/styles/tokens.css`):
+
+  | Token | Light | Dark |
+  |---|---|---|
+  | `--bg` | `#FAF8F5` | `#1C1B19` |
+  | `--sidebar` | `#F3EFE9` | `#181715` |
+  | `--surface` (cards, inputs) | `#FFFFFF` | `#252320` |
+  | `--menu` (popovers) | `#FFFFFF` | `#2B2925` |
+  | `--text` | `#24211D` | `#EDE8E1` |
+  | `--muted` | `#6B655C` | `#A39C91` |
+  | `--border` / `--border-strong` | `#E7E1D8` / `#CFC7BB` | `#34312C` / `#4A463F` |
+  | `--chip` / `--selected` | `#F1ECE5` / `#EFE8DF` | `#33302B` / `#302C27` |
+  | `--accent` / `--accent-ink` / `--accent-soft` | `#B84A33` / `#A3402B` / `#F6E3DC` | `#E07A5F` / `#EE9277` / `#45291F` |
+  | Priority low / med / high / urgent | `#2F6BD8` `#B37A00` `#D9480F` `#C92A2A` | `#7FA6FF` `#F2C14E` `#FF8A4C` `#FF6B6B` |
+
+  Radii are 10 px (cards and inputs), 6 px (chips and menu items), and round
+  checkboxes. Shadows appear only on floating layers (menus, sheets, the
+  just-added card). Spacing uses a 4 px scale.
+- **Type**: Inter (UI), Source Serif 4 (page titles and note headings), and
+  Geist Mono (code). All are self-hosted woff2, with no CDN fonts (CSP and
+  offline).
+- Contrast meets WCAG 2.2 AA in both modes.
 - **Motion**: 150–200 ms ease-out for sheets and drawers. Respects
   `prefers-reduced-motion`. The just-added card entrance is the one place
   where motion is used for emphasis.
