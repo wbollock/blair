@@ -89,8 +89,7 @@ func Setup(ctx context.Context, opts Options) (*Telemetry, error) {
 	level := parseLevel(opts.LogLevel)
 	jsonHandler := slog.NewJSONHandler(out, &slog.HandlerOptions{Level: level})
 
-	res, err := resource.Merge(resource.Default(), resource.NewWithAttributes(
-		semconv.SchemaURL,
+	res, err := resource.Merge(resource.Default(), resource.NewSchemaless(
 		semconv.ServiceName(ServiceName),
 		semconv.ServiceVersion(opts.Version),
 	))
