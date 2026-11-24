@@ -1,0 +1,11 @@
+.git
+bin
+data
+**/node_modules
+web/build
+web/.svelte-kit
+web/static/vendor
+web/test-results
+web/playwright-report
+internal/web/dist/*
+!internal/web/dist/.gitkeep

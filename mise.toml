@@ -1,5 +1,4 @@
 # Toolchain pins. Run everything through mise so local and CI versions match.
-# Build/test/lint tasks are added in Phase 1 (see docs/PLAN.md).
 [tools]
 go = "1.27.3"
 node = "24"
@@ -7,3 +6,49 @@ node = "24"
 [tasks.hooks]
 description = "Enable repo git hooks (Conventional Commits check)"
 run = "git config core.hooksPath .githooks && chmod +x .githooks/*"
+
+[tasks.gen]
+description = "Regenerate TypeScript API types from api/openapi.yaml"
+dir = "web"
+run = "npm run gen:api"
+
+[tasks.web]
+description = "Build the SvelteKit app into internal/web/dist"
+run = """
+cd web && npm run build && cd .. &&
+find internal/web/dist -mindepth 1 ! -name .gitkeep -delete &&
+cp -r web/build/. internal/web/dist/
+"""
+
+[tasks.build]
+description = "Build the web app and the blair binary"
+depends = ["web"]
+run = "CGO_ENABLED=0 go build -trimpath -o bin/blair ./cmd/blair"
+
+[tasks.dev]
+description = "Run the API on :8080 (run `cd web && npm run dev` for the UI with hot reload)"
+run = "BLAIR_DATA_DIR=./data go run ./cmd/blair serve"
+
+[tasks.test]
+description = "Go and web unit tests"
+run = ["go test -race ./...", "cd web && npx vitest run"]
+
+[tasks.lint]
+description = "go vet, gofmt and svelte-check"
+run = [
+  "go vet ./...",
+  "test -z \"$(gofmt -l cmd internal api)\" || (gofmt -l cmd internal api; exit 1)",
+  "cd web && npx svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
+]
+
+[tasks.check]
+description = "Everything CI runs: lint, generated code up to date, tests"
+run = [
+  "mise run lint",
+  "mise run gen && git diff --exit-code web/src/lib/api/schema.d.ts",
+  "mise run test",
+]
+
+[tasks.image]
+description = "Build the container image"
+run = "docker build --build-arg VERSION=$(git describe --always --dirty) -t blair:latest ."

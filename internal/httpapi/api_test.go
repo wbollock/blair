@@ -330,10 +330,10 @@ func TestTokensAndScopes(t *testing.T) {
 	expect(t, r.do("GET", "/api/v1/tasks", nil), 200)
 	expect(t, r.do("POST", "/api/v1/tasks", map[string]any{"title": "nope"}), 403)
 	expect(t, r.do("GET", "/api/v1/notes", nil), 403)
-	expect(t, r.do("GET", "/api/v1/me", nil), 403)              // needs account:read
-	expect(t, r.do("GET", "/api/v1/me/sessions", nil), 403)     // session only
+	expect(t, r.do("GET", "/api/v1/me", nil), 403)          // needs account:read
+	expect(t, r.do("GET", "/api/v1/me/sessions", nil), 403) // session only
 	expect(t, r.do("POST", "/api/v1/me/tokens", map[string]any{"name": "x", "scopes": []string{"tasks:read"}}), 403)
-	expect(t, r.do("GET", "/api/v1/admin/users", nil), 403)     // admin never via token
+	expect(t, r.do("GET", "/api/v1/admin/users", nil), 403) // admin never via token
 
 	rw := b.do("POST", "/api/v1/me/tokens", map[string]any{"name": "writer", "scopes": []string{"tasks:read", "tasks:write"}})
 	w := h.token(rw.str("token"))
