@@ -6,6 +6,7 @@
 	import FieldMenu from './FieldMenu.svelte';
 	import Markdown from './Markdown.svelte';
 	import ProjectItems from './menus/ProjectItems.svelte';
+	import StatusItems from './menus/StatusItems.svelte';
 	import ColumnItems from './menus/ColumnItems.svelte';
 	import DueItems from './menus/DueItems.svelte';
 	import PriorityRow from './menus/PriorityRow.svelte';
@@ -15,6 +16,7 @@
 	const items = $derived(app.justAdded.map((id) => app.tasks[id]).filter(Boolean));
 	const shown = $derived(items.slice(0, max));
 	const priorityNames = ['Priority', 'Low', 'Medium', 'High', 'Urgent'];
+	const statusNames: Record<string, string> = { todo: 'To do', doing: 'Doing', waiting: 'Waiting', done: 'Done', cancelled: 'Cancelled' };
 
 	function where(t: (typeof items)[number]) {
 		return app.project(t.project_id)?.name ?? 'Inbox';
@@ -34,7 +36,18 @@
 			{@const hidden = app.view && !app.view.matches(t)}
 			{@const project = app.project(t.project_id)}
 			{@const column = app.column(t.column_id)}
-			<article class="card" class:pending={t.version === 0}>
+			<article
+				class="card"
+				class:pending={t.version === 0}
+				class:dragging={app.dragId === t.id}
+				draggable="true"
+				ondragstart={(e) => {
+					app.dragId = t.id;
+					e.dataTransfer?.setData('text/plain', t.title);
+				}}
+				ondragend={() => (app.dragId = null)}
+				aria-label={`Just added: ${t.title}. Drag onto a project or board column to file it.`}
+			>
 				<div class="top">
 					<Checkbox done={t.status === 'done' || t.status === 'cancelled'} priority={t.priority} onclick={() => app.toggleDone(t.id)} />
 					<button class="title" onclick={() => (app.drawer = t.id)}><Markdown src={t.title} inline /></button>
@@ -60,6 +73,9 @@
 							{#snippet items()}<ColumnItems task={t} />{/snippet}
 						</FieldMenu>
 					{/if}
+					<FieldMenu set={t.status !== 'todo'} label={statusNames[t.status]} ariaLabel="Status">
+						{#snippet items()}<StatusItems task={t} />{/snippet}
+					</FieldMenu>
 					<FieldMenu set={!!t.due_date} label={t.due_date ? dueLabel(t.due_date, t.due_time, app.tz) : 'Due'} ariaLabel="Due date">
 						{#snippet items()}<DueItems task={t} />{/snippet}
 					</FieldMenu>
@@ -116,6 +132,12 @@
 	}
 	.card.pending {
 		opacity: 0.85;
+	}
+	.card[draggable='true'] {
+		cursor: grab;
+	}
+	.card.dragging {
+		opacity: 0.5;
 	}
 	@keyframes arrive {
 		from {

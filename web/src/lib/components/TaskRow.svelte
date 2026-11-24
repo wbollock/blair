@@ -6,7 +6,7 @@
 	import Markdown from './Markdown.svelte';
 	import TaskMeta from './TaskMeta.svelte';
 
-	let { task, showProject = true, draggable = false, ondragstart }: { task: Task; showProject?: boolean; draggable?: boolean; ondragstart?: (e: DragEvent) => void } = $props();
+	let { task, showProject = true }: { task: Task; showProject?: boolean } = $props();
 	const done = $derived(task.status === 'done' || task.status === 'cancelled');
 	let pressTimer: ReturnType<typeof setTimeout> | undefined;
 	let pressStart = { x: 0, y: 0 };
@@ -45,6 +45,11 @@
 		if ((e.target as HTMLElement).closest('a')) return;
 		app.drawer = task.id;
 	}
+	function ondragstart(e: DragEvent) {
+		app.dragId = task.id;
+		e.dataTransfer?.setData('text/plain', task.title);
+		if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+	}
 	function onkeydown(e: KeyboardEvent) {
 		if (e.target !== e.currentTarget) return;
 		const k = e.key;
@@ -70,8 +75,9 @@
 	role="listitem"
 	tabindex="0"
 	data-task-id={task.id}
-	{draggable}
+	draggable="true"
 	{ondragstart}
+	ondragend={() => (app.dragId = null)}
 	{oncontextmenu}
 	{onpointerdown}
 	{onpointermove}

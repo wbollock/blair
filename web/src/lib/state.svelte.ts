@@ -39,6 +39,8 @@ class AppState {
 	drawer = $state<string | null>(null);
 	quick = $state<{ id: string; x: number; y: number } | null>(null);
 	captureOpen = $state(false);
+	/** Task being dragged (rows, tray cards, board cards) so any drop target can accept it. */
+	dragId = $state<string | null>(null);
 	sidebarOpen = $state(false);
 	online = $state(true);
 	private toastSeq = 0;

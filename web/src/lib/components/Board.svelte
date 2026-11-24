@@ -8,7 +8,6 @@
 
 	let { project }: { project: Project } = $props();
 	let showOldDone = $state(false);
-	let dragId = $state<string | null>(null);
 	let dropCol = $state<string | null>(null);
 	let adding = $state<string | null>(null);
 	let addText = $state('');
@@ -29,20 +28,15 @@
 		return m;
 	});
 
-	function ondragstart(e: DragEvent, t: Task) {
-		dragId = t.id;
-		e.dataTransfer?.setData('text/plain', t.id);
-		if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
-	}
 	function ondragover(e: DragEvent, colId: string) {
-		if (!dragId) return;
+		if (!app.dragId) return;
 		e.preventDefault();
 		dropCol = colId;
 	}
 	function ondrop(e: DragEvent, colId: string) {
 		e.preventDefault();
-		const id = dragId;
-		dragId = dropCol = null;
+		const id = app.dragId;
+		app.dragId = dropCol = null;
 		if (!id) return;
 		// Place before the card under the pointer, else append.
 		const cards = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[data-task-id]')].filter((el) => el.dataset.taskId !== id);
@@ -131,8 +125,8 @@
 			</header>
 			<div class="cards" role="list">
 				{#each tasks as t (t.id)}
-					<div class="card" class:dragging={dragId === t.id}>
-						<TaskRow task={t} showProject={false} draggable={true} ondragstart={(e) => ondragstart(e, t)} />
+					<div class="card" class:dragging={app.dragId === t.id}>
+						<TaskRow task={t} showProject={false} />
 					</div>
 				{/each}
 			</div>

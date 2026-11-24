@@ -44,6 +44,23 @@
 		}
 	}
 	const close = () => (app.sidebarOpen = false);
+
+	// Drop a dragged task on Inbox or a project to file it.
+	let dropTarget = $state<string | null>(null);
+	function over(e: DragEvent, target: string) {
+		if (!app.dragId) return;
+		e.preventDefault();
+		dropTarget = target;
+	}
+	function drop(e: DragEvent, projectId: string | null) {
+		e.preventDefault();
+		const id = app.dragId;
+		app.dragId = dropTarget = null;
+		const t = id ? app.tasks[id] : undefined;
+		if (!t || t.project_id === projectId) return;
+		const name = projectId ? (app.project(projectId)?.name ?? 'project') : 'Inbox';
+		app.update(t.id, { project_id: projectId }, { undo: `Moved to ${name}` });
+	}
 </script>
 
 <nav class="sidebar" class:open={app.sidebarOpen} aria-label="Main">
@@ -51,7 +68,17 @@
 		<a href="/today" onclick={close}>Blair</a>
 	</div>
 	{#each nav as n (n.href)}
-		<a class="item" class:active={path === n.href} aria-current={path === n.href ? 'page' : undefined} href={n.href} onclick={close}>
+		<a
+			class="item"
+			class:active={path === n.href}
+			class:drop={n.href === '/inbox' && dropTarget === 'inbox'}
+			aria-current={path === n.href ? 'page' : undefined}
+			href={n.href}
+			onclick={close}
+			ondragover={n.href === '/inbox' ? (e) => over(e, 'inbox') : undefined}
+			ondragleave={() => (dropTarget = null)}
+			ondrop={n.href === '/inbox' ? (e) => drop(e, null) : undefined}
+		>
 			<n.icon size={17} aria-hidden="true" />
 			<span class="grow">{n.label}</span>
 			{#if n.count}<span class="count" class:accent={n.href === '/inbox'}>{n.count}</span>{/if}
@@ -72,7 +99,16 @@
 		</form>
 	{/if}
 	{#each projects as p (p.id)}
-		<a class="item" class:active={path === `/project/${p.id}`} href="/project/{p.id}" onclick={close}>
+		<a
+			class="item"
+			class:active={path === `/project/${p.id}`}
+			class:drop={dropTarget === p.id}
+			href="/project/{p.id}"
+			onclick={close}
+			ondragover={(e) => over(e, p.id)}
+			ondragleave={() => (dropTarget = null)}
+			ondrop={(e) => drop(e, p.id)}
+		>
 			<span class="dot" style="background: {p.color || 'var(--accent)'}"></span>
 			<span class="grow">{p.name}</span>
 			{#if p.open_tasks}<span class="count">{p.open_tasks}</span>{/if}
@@ -154,6 +190,10 @@
 	.item.active {
 		background: var(--selected);
 		font-weight: 600;
+	}
+	.item.drop {
+		background: var(--accent-soft);
+		box-shadow: inset 0 0 0 1.5px var(--accent);
 	}
 	.item.sub {
 		min-height: 32px;

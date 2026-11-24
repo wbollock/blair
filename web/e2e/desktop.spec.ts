@@ -12,7 +12,10 @@ test('setup, 2FA, quick-add, tray, quick actions, board', async ({ page }) => {
 	await page.goto(setupUrl!.replace(/^https?:\/\/[^/]+/, ''));
 	await page.getByLabel('Your name').fill('Will');
 	await page.getByLabel('Email').fill(EMAIL);
-	await page.getByLabel(/Password/).fill(PASSWORD);
+	await page.getByLabel(/^Password/).fill(PASSWORD);
+	await page.getByLabel('Confirm password').fill(PASSWORD + 'x');
+	await expect(page.getByRole('button', { name: 'Create account' })).toBeDisabled();
+	await page.getByLabel('Confirm password').fill(PASSWORD);
 	await page.getByRole('button', { name: 'Create account' }).click();
 	await expect(page.getByText('Turn on two-factor authentication now')).toBeVisible();
 
@@ -40,7 +43,7 @@ test('setup, 2FA, quick-add, tray, quick actions, board', async ({ page }) => {
 	saveState({ secret, lastStep: second.step });
 
 	// Quick-add with syntax creates the project, label and due date (SPEC §5.5 #4).
-	const qa = page.getByLabel('New task');
+	const qa = page.getByLabel('New task', { exact: true });
 	await qa.fill('Fix gutter #homelab /doing !high fri at 9am @house');
 	await qa.press('Enter');
 	const card = page.locator('section[aria-label="Just added"] article').first();
@@ -80,7 +83,7 @@ test('setup, 2FA, quick-add, tray, quick actions, board', async ({ page }) => {
 	await expect(page.getByText('Moved to homelab')).toBeVisible();
 
 	if (shots) {
-		await page.getByLabel('New task').fill('Call dentist tomorrow 9am @errands');
+		await qa.fill('Call dentist tomorrow 9am @errands');
 		await page.locator('h1').click();
 		await setTheme(page, 'light');
 		await page.screenshot({ path: `${shots}/today-light.png` });
@@ -105,6 +108,23 @@ test('setup, 2FA, quick-add, tray, quick actions, board', async ({ page }) => {
 	await page.getByLabel('New task in To do').press('Enter');
 	await expect(board.getByRole('region', { name: 'To do' })).toContainText('Replace UPS battery');
 	if (shots) await page.screenshot({ path: `${shots}/board.png` });
+
+	// Drag a just-added card from another project straight onto a board column.
+	await qa.fill('Call plumber #blog-ideas !low');
+	await qa.press('Enter');
+	const plumber = page.locator('section[aria-label="Just added"] article').filter({ hasText: 'Call plumber' });
+	await expect(plumber).toContainText('not shown in homelab');
+	await plumber.dragTo(board.getByRole('region', { name: 'Doing' }));
+	await expect(board.getByRole('region', { name: 'Doing' })).toContainText('Call plumber');
+	await expect(plumber.getByRole('button', { name: 'Project' })).toContainText('homelab');
+	// Switch kanban status from the tray: Done moves it to the Done column.
+	await plumber.getByRole('button', { name: 'Status' }).click();
+	await page.getByRole('menuitem', { name: /^Done/ }).click();
+	await expect(board.getByRole('region', { name: 'Done' })).toContainText('Call plumber');
+	// Drop a board card onto a sidebar project to move it there.
+	await board.locator('[data-task-id]').filter({ hasText: 'Replace UPS battery' }).dragTo(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /blog-ideas/ }));
+	await expect(board).not.toContainText('Replace UPS battery');
+	await expect(page.getByText('Moved to blog-ideas')).toBeVisible();
 
 	// Task drawer edits and markdown.
 	await board.getByText('Fix gutter').click();
