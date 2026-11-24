@@ -1,0 +1,122 @@
+/* Paper design tokens (SPEC §13). Components use only these variables, so a
+   second look ("Soft") is a new token set and nothing else. */
+
+:root,
+:root[data-theme='light'] {
+	color-scheme: light;
+	--bg: #faf8f5;
+	--sidebar: #f3efe9;
+	--surface: #ffffff;
+	--menu: #ffffff;
+	--text: #24211d;
+	--muted: #6b655c;
+	--faint: #8f877c;
+	--border: #e7e1d8;
+	--border-strong: #cfc7bb;
+	--chip: #f1ece5;
+	--selected: #efe8df;
+	--hover: #f4efe8;
+	--accent: #b84a33;
+	--accent-ink: #a3402b;
+	--accent-soft: #f6e3dc;
+	--on-accent: #ffffff;
+	--done: #4f7d4e;
+	--p1: #2f6bd8;
+	--p1-soft: #e4edfc;
+	--p2: #b37a00;
+	--p2-soft: #fbf0d6;
+	--p3: #d9480f;
+	--p3-soft: #fde7dc;
+	--p4: #c92a2a;
+	--p4-soft: #fbe1e1;
+	--danger: #c92a2a;
+	--scrim: rgba(36, 33, 29, 0.32);
+	--shadow-float: 0 14px 36px rgba(60, 40, 20, 0.16), 0 2px 6px rgba(60, 40, 20, 0.08);
+	--shadow-card: 0 6px 18px rgba(60, 40, 20, 0.08);
+	--focus-ring: 0 0 0 3px rgba(184, 74, 51, 0.22);
+}
+
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme='light']) {
+		color-scheme: dark;
+		--bg: #1c1b19;
+		--sidebar: #181715;
+		--surface: #252320;
+		--menu: #2b2925;
+		--text: #ede8e1;
+		--muted: #a39c91;
+		--faint: #857e74;
+		--border: #34312c;
+		--border-strong: #4a463f;
+		--chip: #33302b;
+		--selected: #302c27;
+		--hover: #2a2825;
+		--accent: #e07a5f;
+		--accent-ink: #ee9277;
+		--accent-soft: #45291f;
+		--on-accent: #1c1b19;
+		--done: #8bbf88;
+		--p1: #7fa6ff;
+		--p1-soft: #1e2a47;
+		--p2: #f2c14e;
+		--p2-soft: #3a3016;
+		--p3: #ff8a4c;
+		--p3-soft: #45261a;
+		--p4: #ff6b6b;
+		--p4-soft: #47201f;
+		--danger: #ff6b6b;
+		--scrim: rgba(0, 0, 0, 0.55);
+		--shadow-float: 0 16px 40px rgba(0, 0, 0, 0.5);
+		--shadow-card: 0 6px 18px rgba(0, 0, 0, 0.3);
+		--focus-ring: 0 0 0 3px rgba(224, 122, 95, 0.3);
+	}
+}
+
+:root[data-theme='dark'] {
+	color-scheme: dark;
+	--bg: #1c1b19;
+	--sidebar: #181715;
+	--surface: #252320;
+	--menu: #2b2925;
+	--text: #ede8e1;
+	--muted: #a39c91;
+	--faint: #857e74;
+	--border: #34312c;
+	--border-strong: #4a463f;
+	--chip: #33302b;
+	--selected: #302c27;
+	--hover: #2a2825;
+	--accent: #e07a5f;
+	--accent-ink: #ee9277;
+	--accent-soft: #45291f;
+	--on-accent: #1c1b19;
+	--done: #8bbf88;
+	--p1: #7fa6ff;
+	--p1-soft: #1e2a47;
+	--p2: #f2c14e;
+	--p2-soft: #3a3016;
+	--p3: #ff8a4c;
+	--p3-soft: #45261a;
+	--p4: #ff6b6b;
+	--p4-soft: #47201f;
+	--danger: #ff6b6b;
+	--scrim: rgba(0, 0, 0, 0.55);
+	--shadow-float: 0 16px 40px rgba(0, 0, 0, 0.5);
+	--shadow-card: 0 6px 18px rgba(0, 0, 0, 0.3);
+	--focus-ring: 0 0 0 3px rgba(224, 122, 95, 0.3);
+}
+
+:root {
+	--font-ui: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+	--font-display: 'Source Serif 4 Variable', Georgia, serif;
+	--font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+	--r: 10px;
+	--r-sm: 6px;
+	--r-check: 999px;
+	--r-dot: 999px;
+	--row-pad: 10px;
+	--ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+	--dur: 180ms;
+	--sidebar-w: 248px;
+	--tabbar-h: 60px;
+}
