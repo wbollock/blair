@@ -71,6 +71,7 @@ Usage:
   blair user passwd --email E           set a password (stdin); forces a change at next login
   blair user reset-2fa --email E        turn off 2FA for a user
   blair backup [--to PATH]              write a consistent database copy
+  blair healthcheck                     exit 0 if the local server is ready (container probes)
   blair version
 
 Configuration is read from BLAIR_* and OTEL_* environment variables (see docs/SPEC.md §14).
@@ -95,6 +96,8 @@ func main() {
 		err = userCmd(args)
 	case "backup":
 		err = backupCmd(args)
+	case "healthcheck":
+		err = healthcheck()
 	case "version":
 		fmt.Println(buildVersion())
 	case "help", "-h", "--help":
@@ -289,6 +292,27 @@ func background(ctx context.Context, cfg *config.Config, db *store.DB, svc *serv
 			}
 		}
 	}
+}
+
+// healthcheck probes /readyz on the configured listen port (distroless has no curl).
+func healthcheck() error {
+	addr := os.Getenv("BLAIR_ADDR")
+	if addr == "" {
+		addr = ":8080"
+	}
+	if strings.HasPrefix(addr, ":") {
+		addr = "127.0.0.1" + addr
+	}
+	c := http.Client{Timeout: 3 * time.Second}
+	res, err := c.Get("http://" + addr + "/readyz")
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("readyz returned %d", res.StatusCode)
+	}
+	return nil
 }
 
 func readPassword() (string, error) {
