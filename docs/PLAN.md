@@ -52,6 +52,9 @@ Rules for every phase:
 - [ ] Task detail drawer/route: title (inline md), description (GFM editor + preview), all fields
 - [ ] markdown-it + DOMPurify renderer with XSS test corpus
 - [ ] Undo toasts; keyboard shortcuts framework + `?` cheat sheet
+- [ ] Shared field pickers (project+column, status, due, priority, labels, reminder): one component each, reused by menu, tray and triage
+- [ ] Quick actions menu (§4.4): right-click / `⋯` / `.` on desktop, long-press + swipe-left sheet on mobile; sidebar project, label and note menus
+- [ ] Multi-select (Cmd/Shift-click, mobile select mode) + bulk actions via `POST /tasks/batch` with a single undo (pull the batch endpoint forward from Phase 8)
 
 **Exit:** manage tasks end-to-end on desktop and phone.
 
@@ -71,7 +74,8 @@ Rules for every phase:
 ## Phase 5 — Kanban (§7)
 
 - [ ] Board view, column CRUD UI (name + status, WIP limit, reorder, delete-with-move)
-- [ ] Drag and drop desktop + touch, keyboard DnD, "Move to…" menu
+- [ ] Drag and drop desktop + touch, keyboard DnD; long-press disambiguation (hold = quick actions, move = drag)
+- [ ] Column header context menu (rename, status, WIP, move, delete-with-move)
 - [ ] Mobile snap columns + pills; Done column trimming
 - [ ] Optimistic moves with rollback; e2e for drag → status change
 
@@ -105,7 +109,7 @@ Rules for every phase:
 - [ ] Vikunja importer (fixture from a real export, completion dates preserved)
 - [ ] Obsidian Tasks, generic CSV with mapping UI
 - [ ] Todoist, TickTick, tududi importers
-- [ ] `POST /tasks/batch`; "Migrating from X" docs with a stdlib Python script
+- [ ] "Migrating from X" docs with a stdlib Python script using `POST /tasks/batch` (built in Phase 3)
 - [ ] Settings → Import/Export UI with preview
 
 **Exit:** import the live Vikunja data (open + completed, with dates) into Blair.

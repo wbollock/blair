@@ -210,8 +210,78 @@ Column: `id, project_id, name (1–50), status, position, wip_limit?`.
 Checkbox (status-aware: ring colour = priority) · rendered title · chips for
 due (red if overdue), project/column (only when outside that project), labels,
 checklist progress `2/5`, and note/description icon. Tap the row to open
-details. On mobile, swipe right to complete and swipe left for a quick actions
-sheet (schedule, move, priority, delete).
+details. On mobile, swipe right to complete and swipe left to open the quick
+actions sheet (§4.4).
+
+### 4.4 Quick actions (right-click menu)
+
+One **quick actions** menu changes a task without opening it. The menu has the
+same content everywhere. Only how you open it and how it is drawn change.
+
+**Where it is available:** task rows in every list view, kanban cards,
+just-added tray cards, triage cards, search results, and Logbook/Trash rows
+(which show a reduced set: Reopen/Restore, Delete forever).
+
+**How to open it:**
+
+| Platform | Trigger | Drawn as |
+|---|---|---|
+| Desktop | Right-click on a row or card | Context menu at the pointer, with submenus |
+| Desktop | `⋯` button on row hover, `.` hotkey, `Shift+F10`, or the Menu key on the focused row | Same menu, anchored to the row |
+| Phone/tablet | Long-press (≈450 ms, no movement) on a row or card, or the `⋯` button | Bottom sheet; submenus slide in as pages with a back arrow |
+| Phone | Swipe left on a list row | Same bottom sheet |
+
+**Menu contents** (in this order, with keyboard accelerators shown):
+
+1. **Open** `Enter`
+2. **Complete / Reopen** `x`
+3. **Status ▸**: todo · doing · waiting · done · cancelled. Each status shows
+   which column it moves the task to (per §3.3).
+4. **Column ▸**: the current project's columns, with the current column checked.
+   Hidden for Inbox tasks.
+5. **Move to project ▸**: a type-to-filter list with recent projects first,
+   then Inbox. When you pick a project you also pick its column in the same
+   step: Enter accepts the default column, and → opens the column list.
+6. **Due ▸**: Today · Tomorrow · This weekend · Next week · Pick date… · No date.
+   The current value is shown.
+7. **Priority**: an inline row of five swatches (none, low, medium, high,
+   urgent), so one click sets it with no submenu. Keys `0`–`4`.
+8. **Labels ▸**: a checkable, filterable list. Toggling a label keeps the menu
+   open. You can create a new label from the filter text.
+9. **Reminder ▸**: the presets from §8, plus Custom… and Remove.
+10. **Duplicate** · **Copy link** · **Copy as markdown**
+11. **Convert to note**
+12. **Delete** `Del` (with an Undo toast)
+
+**Behaviour:**
+
+- Every action applies immediately and optimistically. A failed action rolls
+  back and shows an error toast. Actions that remove a task from the current
+  view (move, complete, delete, change due date) show an **Undo** toast for
+  8 s. When a task leaves a filtered view, it fades out instead of vanishing.
+- The pickers are **the same components** the just-added tray chips and triage
+  use (§5.3, §5.4). There is one picker implementation per field.
+- **Multi-select**: on desktop, `Cmd/Ctrl+click` toggles selection and
+  `Shift+click` selects a range. On mobile, the sheet has a "Select" action
+  that enters selection mode. Right-clicking inside a selection applies
+  actions to every selected task. The menu header shows "12 tasks" and hides
+  Open, Duplicate, and Convert. Bulk actions go through `POST /tasks/batch`
+  as one undoable operation.
+- The **native browser menu is kept** inside text inputs, editors, rendered
+  links, and anywhere you hold `Shift` while right-clicking. Blair only takes
+  over right-click on rows and cards.
+- Accessibility: the menu uses ARIA menu semantics (Bits UI ContextMenu /
+  DropdownMenu), arrow keys move through items, typing jumps to an item, and
+  `Esc` closes one level at a time. The `⋯` button is the visible, discoverable
+  path for people who don't know about right-click.
+- **Other objects get their own menus** with the same mechanics:
+  - Sidebar project: Rename, Colour/icon, Board/List default, Archive, Export
+    project, Delete.
+  - Kanban column header: Rename, Change status, WIP limit, Move left/right,
+    Add column after, Delete (move tasks to…).
+  - Note: Open, Pin/Unpin, Move to project, Convert to task, Copy as markdown,
+    Delete.
+  - Label: Rename, Colour, Delete.
 
 ---
 
@@ -337,6 +407,11 @@ input, with an entrance animation that draws the eye.
 5. With the network offline, adding a task shows it in the tray marked
    "pending sync", and it appears on the server after reconnecting (§12.3).
 6. Triage files 10 Inbox tasks using only the keyboard.
+7. Right-clicking a task (desktop) or long-pressing it (mobile) opens quick
+   actions. The user can change column, status, project, priority and due date
+   from that menu, and each change persists and can be undone.
+8. Right-clicking a selection of 5 tasks and choosing **Move to project ▸ Work**
+   moves all 5 in one batch request, and one Undo restores all 5.
 
 ---
 
@@ -378,9 +453,16 @@ at the end asks for a name and status.
 ### 7.2 Mobile
 
 One column per screen width with scroll-snap. Column pills at the top for
-quick jumps. Long-press a card to drag; dragging near the edge pages to the
-next column. **Every drag action also has a non-drag path**: a card's "Move
-to…" menu lists columns, for accessibility and reliability.
+quick jumps. A long-press on a card does one of two things, depending on what
+you do next:
+
+- **Hold still** for 450 ms and the quick actions sheet opens (§4.4).
+- **Start moving** after the press registers (more than 8 px of movement
+  before release) and it becomes a drag. The sheet never opens.
+
+Dragging near the screen edge pages to the next column. **Every drag action
+also has a non-drag path**: the quick actions menu's Column and Move to project
+items, for accessibility and reliability.
 
 ### 7.3 Ordering
 
@@ -745,7 +827,10 @@ Accessibility and Best Practices ≥ 95.
   axe checks run in e2e and must have zero violations.
 - **Keyboard shortcuts** (desktop, `?` shows a cheat sheet): `q`/`n` add,
   `/` search, `g i` Inbox, `g t` Today, `g u` Upcoming, `g n` Notes, `t` triage,
-  `b` list/board toggle, `e` edit, `x` complete, `Del` delete, `[`/`]` sidebar.
+  `b` list/board toggle, `e` edit, `x` complete, `Del` delete, `[`/`]` sidebar,
+  `j`/`k` move row focus, `.` or `Shift+F10` quick actions menu, `0`–`4`
+  priority, `d` due, `m` move to project, `c` column, `l` labels on the focused
+  row (or on the selection).
 - **Empty states** teach the feature, e.g. the Inbox shows a quick-add syntax
   example.
 - **Undo** for complete, delete, and move (toast, 8 s).
