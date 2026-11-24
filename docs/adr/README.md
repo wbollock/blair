@@ -10,5 +10,6 @@
 - [ADR-0008](0008-client-ids-offline-outbox.md): Client-generated UUIDv7 IDs and an offline capture outbox
 - [ADR-0009](0009-in-app-notifications-sse.md): In-app notifications over SSE, no push
 - [ADR-0010](0010-opentelemetry-observability.md): OpenTelemetry for traces, metrics, logs and profiles
+- [ADR-0011](0011-mvp-build-simplifications.md): Simplifications made while building the MVP
 
 New ADR: copy the shape of an existing one, take the next number, add it here.

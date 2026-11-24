@@ -1,5 +1,11 @@
 # Implementation Plan
 
+> **Status 2026-11-24:** MVP deployed at https://blair.wboll.dev. Done: Phases 1–5
+> (except multi-select), batch API + export from Phase 8, and the Phase 7 manifest
+> and icons. Still open: the unchecked items below, which are mainly the offline
+> outbox and service worker, reminders and notifications, SSE sync, multi-select,
+> and profiling push. See ADR-0011 for what changed from this plan.
+
 Build order for [SPEC.md](SPEC.md). Each phase ends with a **deployable,
 tested app**: a walking skeleton first, then vertical slices. Tick the boxes as
 work lands. One checkbox is roughly one to three Conventional Commits.
