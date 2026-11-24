@@ -3,7 +3,7 @@
 Status: Accepted · Date: 2026-11-24
 
 ## Context
-API-first is a core requirement: imports, scripts, CLI, and future native
+API-first is a core requirement: migration scripts and agents, CLI, and future native
 apps use the same API, and the docs must be trustworthy.
 
 ## Decision

@@ -29,7 +29,7 @@ immediately (SPEC §5).
    DB, Vitest for frontend logic, Playwright for user journeys.
 4. Implement until the tests pass, then run `mise run check`.
 5. Commit in small Conventional Commits (`feat(tasks): …`, `fix(web): …`,
-   `docs(spec): …`, `test(import): …`). The hook in `.githooks/` enforces the
+   `docs(spec): …`, `test(batch): …`). The hook in `.githooks/` enforces the
    format. Run `mise run hooks` once per clone.
 6. Tick the box in `docs/PLAN.md` when a checklist item is fully done.
 
@@ -63,8 +63,12 @@ Update this section when they exist.
 - **CGo-free** (`modernc.org/sqlite`). The SQLite DSN uses `_pragma=name(value)`.
 - **Contract tests**: handler responses are validated against the OpenAPI spec.
   Never weaken the validator to make a test pass.
-- **Imports preserve history** (`created_at`, `completed_at`) and are
-  idempotent on `(source, source_id)`.
+- **Batch upserts preserve history** (`created_at`, `completed_at`) and are
+  idempotent on `(external_source, external_id)`. There are no built-in
+  importers: migrations go through the public API.
+- **Telemetry carries no content or PII**: no titles, bodies, emails or
+  tokens in span attributes or log fields. New spans and metrics are listed
+  in `docs/OBSERVABILITY.md`.
 - Secrets are never logged. Tokens and codes are stored hashed. The TOTP
   secret is stored encrypted.
 
@@ -74,8 +78,9 @@ Update this section when they exist.
 cmd/blair/            main + CLI subcommands
 internal/config/      env config
 internal/httpapi/     handlers (oapi-codegen strict server), middleware
-internal/service/     business rules (tasks, projects, auth, quickadd, import)
+internal/service/     business rules (tasks, projects, auth, quickadd, batch)
 internal/store/       sqlc queries + generated code, migrations
+internal/telemetry/   OpenTelemetry setup (traces, metrics, logs, profiles)
 internal/web/         go:embed of the SvelteKit build
 api/openapi.yaml      the API contract
 web/                  SvelteKit app (src/lib/api = generated client)

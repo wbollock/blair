@@ -5,7 +5,7 @@ Status: Accepted · Date: 2026-11-24
 ## Context
 Owner likes per-project boards (Vikunja) but wants custom columns that stay
 aligned with task status (tududi). Global-status-only boards are too rigid;
-free-form columns make "is this done?" ambiguous for Today/Logbook/import/export.
+free-form columns make "is this done?" ambiguous for Today/Logbook/export/migrations.
 
 ## Decision
 - Fixed status enum: `todo`, `doing`, `waiting`, `done`, `cancelled`.

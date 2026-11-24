@@ -20,4 +20,4 @@ offline capture and rich DnD.
 
 ## Consequences
 - Two toolchains (Go + Node) in dev and CI; mise pins both.
-- Small bundles keep the mobile performance budget achievable.
+- Small bundles keep the app fast on phones.

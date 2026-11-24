@@ -10,7 +10,9 @@ A self-hosted task and notes app that never loses the task you just added.
 - **Notes**, in-app reminders, and notifications.
 - **Secure accounts** with TOTP 2FA, sessions, and scoped API tokens.
 - **API-first**: an OpenAPI contract with interactive docs at `/api/docs`.
-  Import from Vikunja, tududi, Todoist, TickTick, Obsidian Tasks, and CSV.
+  Batch upsert and full export make it easy for an agent to migrate your
+  data from any other app.
+- **OpenTelemetry** traces, metrics, logs and profiles over OTLP.
 - **PWA** for iOS, macOS Safari, Android Firefox and Chrome, with offline
   capture.
 - **One Go binary** with SQLite and built-in backups.

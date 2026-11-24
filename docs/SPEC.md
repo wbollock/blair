@@ -4,7 +4,7 @@ Status: **Draft v1** · Owner: Will Bollock · Last updated: 2026-11-24
 
 Blair is a self-hosted task and notes app in the style of TickTick, Todoist,
 Vikunja, tududi and Obsidian Tasks. It is **web-first** and **API-first**: the web
-UI is one client of a documented JSON API, and import scripts, a CLI, and future
+UI is one client of a documented JSON API, and migration scripts or agents, a CLI, and future
 native apps use the same API.
 
 This document is the source of truth. Code that changes behavior updates this
@@ -39,9 +39,9 @@ priority, details) in one or two taps, right after you add it.
    TOTP 2FA, recovery codes, sessions, scoped API tokens (§9).
 6. **A well-documented API.** OpenAPI 3 contract, interactive docs served by
    the app, examples for every endpoint (§10).
-7. **Import, export and bulk CRUD over the API.** Import from Vikunja, tududi,
-   Todoist, TickTick, Obsidian Tasks and CSV, keeping completion dates. Full
-   JSON export that round-trips (§11).
+7. **Bulk API and export built for migrations by agents.** No built-in
+   importers. Instead: batch upsert by external id, writable completion dates,
+   dry runs, and a full JSON export that round-trips (§11).
 8. **Responsive, clean and beautiful** on desktop and phone. Installable as a
    PWA on iOS Safari, macOS Safari (Add to Dock), Android Firefox and Android
    Chrome. Quick-add works offline (§12).
@@ -83,7 +83,7 @@ invite users, and strict per-user data isolation. Every query is scoped by
 | **Triage** | Filing an Inbox task: assigning project/column/due/priority, or completing/deleting it. |
 | **Just-added tray** | The panel of cards for tasks you created in this session (§5.3). |
 | **Note** | A standalone markdown document, not a task. Can be converted to a task. |
-| **Notification** | An in-app message (reminder fired, task overdue, security event, import finished). |
+| **Notification** | An in-app message (reminder fired, task overdue, security event). |
 
 ---
 
@@ -102,7 +102,7 @@ Task 1─* ChecklistItem
 Task *─* Label
 Task 1─* Reminder ──fires──> Notification *─1 User
 User 1─* Note  *─0..1 Project
-User 1─* Session, ApiToken, RecoveryCode, AuditEvent, ImportJob
+User 1─* Session, ApiToken, RecoveryCode, AuditEvent
 ```
 
 ### 3.2 Task
@@ -120,9 +120,9 @@ User 1─* Session, ApiToken, RecoveryCode, AuditEvent, ImportJob
 | `due_time` | time? | `HH:MM`. Only valid with `due_date`. Absent = all-day. |
 | `labels` | uuid[] | User's labels. |
 | `position` | string | Fractional index for ordering within column/list (§7.3). |
-| `completed_at` | timestamp? | Set when status becomes `done`/`cancelled`. **Writable on create/import.** |
+| `completed_at` | timestamp? | Set when status becomes `done`/`cancelled`. **Writable on create/upsert** (§11). |
 | `deleted_at` | timestamp? | Soft delete. Trash purged after 30 days. |
-| `source`, `source_id` | string? | Import origin, for idempotent re-import (§11). |
+| `external_source`, `external_id` | string? | Origin in another app; unique per owner; upsert key (§11). |
 | `recurrence` | string? | Reserved (RRULE) for Phase 2. Rejected in v1. |
 
 Computed (read-only) fields in responses: `checklist_total`, `checklist_done`,
@@ -169,7 +169,7 @@ Column: `id, project_id, name (1–50), status, position, wip_limit?`.
 - **User**: `id, email (unique, normalized), display_name, password_hash, timezone
   (IANA, default from browser at signup), week_start, is_admin, disabled_at,
   totp_secret_enc?, totp_enabled_at?, settings (JSON: default view, theme, etc.)`.
-- **Session, ApiToken, RecoveryCode, Invite, AuditEvent, ImportJob**: see §9, §11.
+- **Session, ApiToken, RecoveryCode, Invite, AuditEvent**: see §9.
 
 ---
 
@@ -190,7 +190,7 @@ Column: `id, project_id, name (1–50), status, position, wip_limit?`.
 | **Logbook** | Completed and cancelled tasks, by completion date | |
 | **Trash** | Soft-deleted tasks and notes, 30 days | Restore / delete forever. |
 | **Triage** | Focused one-at-a-time Inbox filing (§5.4) | |
-| **Settings** | Profile, security (password, 2FA, sessions, API tokens), import/export, appearance, admin (users, invites) | |
+| **Settings** | Profile, security (password, 2FA, sessions, API tokens), data export, appearance, admin (users, invites) | |
 
 ### 4.2 Layout
 
@@ -482,7 +482,7 @@ hidden from the board by default (toggle), but are always in the Logbook.
 
 - **No Web Push, no email** in v1. Notifications live inside the app, per account.
 - Sources: a reminder fires; a task becomes overdue (once, at 09:00 local on
-  the day after the due date — configurable or off); an import job finishes;
+  the day after the due date — configurable or off);
   security events (new login from a new device, 2FA enabled or disabled, API
   token created).
 - A **scheduler** goroutine ticks every 30 s, selecting due reminders with
@@ -560,7 +560,7 @@ checklist. A security review against it is a Phase 9 exit criterion.
   prefix for secret scanning. Shown once and stored hashed. Fields: name,
   scopes, optional expiry, last-used time.
 - Scopes: `tasks:read`, `tasks:write`, `notes:read`, `notes:write`,
-  `import`, `export`, `account:read`. Admin endpoints are **never** reachable
+  `export`, `account:read`. Admin endpoints are **never** reachable
   by token.
 - Sent as `Authorization: Bearer …`. Tokens are not accepted from query strings
   (except a separate, read-only `events` ticket for SSE: see §10.7).
@@ -575,7 +575,7 @@ checklist. A security review against it is a Phase 9 exit criterion.
   API 600/min per token or session. `429` responses carry `Retry-After`.
 - **Trusted proxies**: client IP comes from `X-Forwarded-For` only when the
   peer is in `BLAIR_TRUSTED_PROXIES` (default `127.0.0.1/32,::1/128`).
-- Request bodies are limited to 1 MiB by default and 50 MiB for imports. All
+- Request bodies are limited to 1 MiB by default and 20 MiB for batch endpoints. All
   input is validated against the OpenAPI schema.
 - Timing-safe comparisons for tokens and codes.
 
@@ -595,7 +595,7 @@ plus `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`,
 - Secrets at rest (TOTP) are encrypted. Credentials are hashed.
 - An **audit log** records login success and failure, MFA events, password and
   2FA changes, token create and revoke, session revoke, admin actions, and
-  import and export. It is visible in Settings and retained 1 year.
+  batch writes over 100 ops, and exports. It is visible in Settings and retained 1 year.
 - Account deletion hard-deletes all user rows (after password and 2FA
   confirmation). Export is offered first.
 
@@ -649,7 +649,7 @@ plus `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`,
 | `GET/POST /tasks` · `GET/PATCH/DELETE /tasks/{id}` | Tasks (`POST` accepts `quick_add`) |
 | `POST /tasks/{id}/move` | `{project_id?, column_id?, before_id?, after_id?}` → position + status rules |
 | `POST /tasks/{id}/restore` | From trash |
-| `POST /tasks/batch` | Up to 500 create/update/delete ops, all-or-nothing |
+| `POST /{tasks,projects,labels,notes}/batch` | Up to 1000 create/upsert/update/delete ops, all-or-nothing, `?dry_run` (§11) |
 | `GET/POST /tasks/{id}/checklist` · `PATCH/DELETE /checklist/{id}` | Checklist |
 | `GET/POST /tasks/{id}/reminders` · `DELETE /reminders/{id}` | Reminders |
 | `GET/POST /labels` · `PATCH/DELETE /labels/{id}` | Labels |
@@ -658,10 +658,9 @@ plus `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`,
 | `GET /search?q=` | Unified search across tasks, checklist, notes |
 | `POST /quick-add/parse` | Parse without creating (for other clients) |
 | `GET /events` | SSE stream |
-| `POST /imports` · `GET /imports[/{id}]` | Import jobs (§11) |
 | `GET /export?format=json\|csv` | Export (§11) |
 | `GET/POST/PATCH/DELETE /admin/users…` · `/admin/invites…` | Admin (session only) |
-| `GET /healthz` · `GET /readyz` · `GET /metrics` (outside `/api/v1`) | Ops |
+| `GET /healthz` · `GET /readyz` (outside `/api/v1`) | Ops (telemetry: §14.2) |
 
 ### 10.4 Example
 
@@ -694,69 +693,70 @@ automatically when the fields don't overlap.
   the same owner with identical content returns `200` with the existing
   resource. With different content it returns `409`. This makes offline-queue
   replays safe.
-- The `Idempotency-Key` header is also honoured on `POST /tasks/batch` and
-  `POST /imports` (24 h window).
+- The `Idempotency-Key` header is also honoured on the batch endpoints (24 h window).
 
 ### 10.7 Events (SSE)
 
 `GET /api/v1/events` (cookie session, or a `?ticket=` from
 `POST /events/ticket`: single use, 60 s, for token clients). Event types:
 `task.created|updated|deleted`, `project.*`, `column.*`, `note.*`,
-`notification.created`, `import.updated`. Each event has an `id` (monotonic
+`notification.created`. Each event has an `id` (monotonic
 per user) and a heartbeat comment every 25 s. A 5-minute replay buffer serves
 `Last-Event-ID`.
 
 ---
 
-## 11. Import and export
+## 11. Bulk API and export (agent-friendly migration)
 
-### 11.1 Export
+Blair ships **no built-in importers**. Migrating from another app is a job for
+a script or an AI agent: it reads the other app's export and writes through
+the API. The API's job is to make that easy, safe to re-run, and lossless.
+
+### 11.1 Bulk writes
+
+- `POST /tasks/batch` (also `/projects/batch`, `/labels/batch`, `/notes/batch`)
+  accepts up to 1000 operations: `{"op": "create"|"upsert"|"update"|"delete", ...}`.
+  It runs in **one transaction**, so it is all-or-nothing, and returns a
+  per-op result.
+  `?dry_run=true` validates and returns the results without writing.
+- **Upsert by external key**: every task, project, label and note accepts
+  `external_source` + `external_id` (for example `vikunja` / `412`).
+  `op: "upsert"` matches on that pair, so re-running a migration updates rows
+  instead of duplicating them. `GET /tasks?external_source=vikunja` lists what
+  came from where.
+- **History is writable on create and upsert**: `created_at`, `completed_at`,
+  and `status` (with `done` and `cancelled` kept exactly as given). This
+  avoids the tududi problem, where completion dates were lost.
+- **References inside a batch**: a create can name a `ref` ("p1"), and later
+  ops in the same batch can point at `"project_ref": "p1"` /
+  `"column_ref": "…"`. A project and its columns and tasks can then be made in
+  one request without a round trip.
+- Projects and columns can also be matched by name
+  (`"project_name": "Homelab"`, case-insensitive), which suits quick scripts.
+- **Validation errors** come back per op with field paths (RFC 9457
+  `errors[]`), so an agent can fix and retry only the failed ops.
+
+### 11.2 Export
 
 - `GET /export?format=json` returns the full account as `blair.export.v1`:
   projects, columns, tasks (including completed and trashed), checklist,
   labels, reminders, notes, and settings. The format is versioned with a JSON
-  Schema in `api/schemas/export.v1.json`. **Export → import into an empty
-  account reproduces the same data** (round-trip test).
+  Schema in `api/schemas/export.v1.json`. **Feeding an export back through the
+  batch endpoints into an empty account reproduces the same data**
+  (round-trip test).
 - `format=csv` returns tasks only, one row per task: id, title, description,
   status, priority, project, column, labels (`;`-joined), due_date, due_time,
   created_at, completed_at.
-- Settings → Import/Export has download buttons. Exports are audit-logged.
+- Settings → Data has download buttons. Exports are audit-logged.
 
-### 11.2 Import
+### 11.3 Agent docs
 
-`POST /imports` (multipart: `file`, `source`, `options` JSON) creates an
-**ImportJob**. Small files (< 2 MB) are processed inline. Larger files run in
-the background with SSE progress updates.
-
-| `source` | Input | Mapping highlights |
-|---|---|---|
-| `blair` | `blair.export.v1` JSON | Lossless. |
-| `vikunja` | Vikunja export zip (`data.json`), or API pull with URL + token | Projects → projects, buckets → columns (done bucket → `done`), labels, priority 1–5 → 0–4, `done_at` preserved, descriptions HTML → markdown. |
-| `tududi` | tududi JSON export | Areas → project prefix/label (option), projects, tags → labels, status map (`not_started`→todo, `in_progress`→doing, `waiting`→waiting, `done`→done, `archived`→done, `cancelled`→cancelled). |
-| `todoist` | Todoist CSV project export or backup zip | Sections → columns, `p1`..`p4` → priority (inverted), labels, dates. |
-| `ticktick` | TickTick backup CSV | Lists → projects, columns from "Column Name", tags, priority 0/1/3/5 → 0/1/2/3, completion time. |
-| `obsidian` | One or more `.md` files (Obsidian Tasks format) | `- [ ]`/`- [x]`, `📅` due, `✅` done date, `⏫🔼🔽` priority, `#tags` → labels, file name or heading → project (option). |
-| `csv` | Any CSV + `options.mapping` | Column mapping UI with preview, date format option. |
-
-Rules:
-
-- **Dry run** (`options.dry_run=true`) returns counts plus the first 50 mapped
-  items and all warnings, without writing. The UI always dry-runs first.
-- **Idempotent**: imported rows store `(source, source_id)`. Re-importing
-  updates instead of duplicating, unless `options.mode=duplicate`.
-- **Preserves history**: `created_at` and `completed_at` from the source are
-  kept. This is the tududi lesson.
-- Unknown fields go into the job report as warnings, never silent drops.
-  The report is downloadable.
-- Projects are matched by name (case-insensitive) unless
-  `options.create_projects=always`.
-- One transaction per job, so it is all-or-nothing.
-
-### 11.3 Bulk CRUD for scripts
-
-`POST /tasks/batch` and the filtered list endpoints cover scripted
-migrations. The API docs include a "Migrating from X" guide with a worked
-script (Python, stdlib only).
+The API docs include a **"Migrating into Blair" guide**. It covers the
+recommended flow (export the source → map → dry run → batch upsert → verify
+counts) and gives a mapping table for common apps: Vikunja, tududi, Todoist,
+TickTick and Obsidian Tasks, covering statuses, priorities and buckets to
+columns. It also includes a worked Python example using only the standard
+library. The table is written so an agent can follow it.
 
 ---
 
@@ -797,12 +797,6 @@ surprise reloads mid-typing).
   projects, and notes are cached in IndexedDB and shown while offline, with
   the "last synced" time.
 - Logging out clears IndexedDB and caches.
-
-### 12.4 Performance budgets (CI-enforced with Lighthouse CI on a mobile profile)
-
-Initial JS ≤ 120 KB gzip for the shell route. LCP ≤ 1.5 s on a mid-range phone
-over 4G. Interaction to Next Paint ≤ 100 ms for quick-add. Lighthouse PWA,
-Accessibility and Best Practices ≥ 95.
 
 ---
 
@@ -846,19 +840,20 @@ Accessibility and Best Practices ≥ 95.
 │   │     └─ service layer (business rules, invariants) │
 │   │           └─ store (sqlc queries) ─► SQLite (WAL) │
 │   ├─ /api/docs, /api/openapi.{yaml,json}              │
-│   ├─ /healthz /readyz /metrics                        │
+│   ├─ /healthz /readyz                                 │
 │   └─ /*  embedded SvelteKit static build (SPA fallback)│
 │  background: scheduler (reminders, overdue, purge,    │
-│              backups), import worker, SSE hub         │
+│              backups), SSE hub, OpenTelemetry SDK     │
 └───────────────────────────────────────────────────────┘
 ```
 
 - **Backend**: Go (toolchain pinned in `mise.toml`), `chi`, `oapi-codegen`
   strict server, `sqlc` + `modernc.org/sqlite` (CGo-free), `pressly/goose`
-  embedded migrations, `log/slog` JSON logs, Prometheus metrics. See ADR-0002
+  embedded migrations, `log/slog`, and the OpenTelemetry SDK for traces,
+  metrics, logs and profiles (§14.2). See ADR-0002
   and ADR-0003.
 - **Layering**: handlers (HTTP ↔ DTO only) → `service` (all rules: column/status
-  invariants, ownership, quick-add, import mapping) → `store` (sqlc). Services
+  invariants, ownership, quick-add, batch upserts) → `store` (sqlc). Services
   take an explicit `actor` (user id). Ownership is enforced in the store by
   always filtering on `owner_id`.
 - **SQLite**: WAL, `busy_timeout=5000`, `foreign_keys=ON`, `synchronous=NORMAL`.
@@ -886,15 +881,45 @@ Accessibility and Best Practices ≥ 95.
 | `BLAIR_REQUIRE_2FA` | `false` | Force 2FA enrollment |
 | `BLAIR_TRUSTED_PROXIES` | `127.0.0.1/32,::1/128` | For client IP |
 | `BLAIR_BACKUP_INTERVAL` / `BLAIR_BACKUP_KEEP` | `24h` / `14` | Built-in `VACUUM INTO` backups to `$DATA_DIR/backups` |
-| `BLAIR_METRICS_TOKEN` | — | If set, `/metrics` requires it |
 | `BLAIR_LOG_LEVEL` | `info` | |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` (+ standard `OTEL_*`) | unset = telemetry export off | Traces, metrics, logs, profiles (§14.2) |
+| `BLAIR_PROMETHEUS` / `BLAIR_METRICS_TOKEN` | `false` / — | Optional `/metrics` scrape endpoint, token-protected |
+| `BLAIR_DEBUG_ADDR` | unset | Localhost-only `pprof` listener, e.g. `127.0.0.1:6060` |
 
-### 14.2 Deployment (this box)
+### 14.2 Observability (OpenTelemetry)
+
+Blair is instrumented with the **OpenTelemetry Go SDK** from Phase 1 (ADR-0010).
+All four signals are configured with the standard `OTEL_*` environment
+variables, so any OTLP backend works (an OTel Collector, Honeycomb, Grafana,
+and so on). With no endpoint set, the exporters are off and the overhead is
+close to zero.
+
+| Signal | How |
+|---|---|
+| **Traces** | `otelhttp` server middleware (route templates as span names, e.g. `PATCH /api/v1/tasks/{id}`); spans around service methods and SQLite queries (a thin `database/sql` wrapper, with query names from sqlc, never parameter values); spans for the scheduler, SSE fan-out and batch ops. W3C `traceparent` propagation. The web client sends a `traceparent` on API calls, so browser actions and server spans join one trace. |
+| **Metrics** | OTel metrics over OTLP: HTTP RED (rate, errors, duration) by route, DB query duration, SQLite pool waits, scheduler lag, SSE connections, outbox replays, batch sizes, and Go runtime metrics. Optionally a Prometheus exporter on `/metrics` (`BLAIR_PROMETHEUS=true`, behind `BLAIR_METRICS_TOKEN`). |
+| **Logs** | `log/slog` with the OTel slog bridge (`otelslog`), so logs carry `trace_id`/`span_id` and go out over OTLP. JSON logs are written to stdout as well. |
+| **Profiles** | Continuous CPU, heap, goroutine and mutex profiles via the OTel profiles signal (OTLP) where the collector supports it. Until then, Pyroscope-compatible push with span-profile linking (`pprof` labels with the span ID). `net/http/pprof` sits on a separate localhost-only listener (`BLAIR_DEBUG_ADDR`, off by default). |
+
+Rules:
+
+- Resource attributes: `service.name=blair`, `service.version` (build info),
+  and `deployment.environment`.
+- **No PII or content in telemetry.** Task titles, note bodies, emails, tokens,
+  and query parameters are never attributes or log fields. A user is
+  identified by an opaque ID only. A test asserts that the span and log
+  exporters never see a known secret or title in a request.
+- Sampling: parent-based, with 100% by default for a single-user install,
+  configurable through `OTEL_TRACES_SAMPLER`.
+- `docs/OBSERVABILITY.md` (Phase 1) lists the span, metric and attribute names.
+  These are a contract, just like the API.
+
+### 14.3 Deployment (this box)
 
 `~/docker/blair/docker-compose.yml` publishes `127.0.0.1:8072:8080` with the
 volume `./data:/data`. The Caddy site `blair.wboll.dev { reverse_proxy
 127.0.0.1:8072 }` is covered by the existing wildcard DNS. Backups are built
-in (`./data/backups`). The `/metrics` endpoint is token-protected.
+in (`./data/backups`). Telemetry goes to an OTLP collector when `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
 
 ---
 
@@ -904,17 +929,17 @@ in (`./data/backups`). The `/metrics` endpoint is token-protected.
   spec in the same commit. ADRs record decisions.
 - **TDD by default**. Go service and handler tests run against a real temporary
   SQLite DB (no DB mocks). Table-driven tests. `-race` in CI. Fuzz tests for the
-  quick-add parser, fractional index, markdown-adjacent inputs, and every
-  importer.
+  quick-add parser, fractional index, markdown-adjacent inputs, and batch
+  payloads.
 - **Test pyramid**: Go unit/integration (bulk) → API contract tests → Vitest
   for frontend logic (parser, outbox, stores) → Playwright e2e for critical
   journeys on Desktop Chrome, Desktop WebKit, Pixel 7 and iPhone 14 emulation,
   with axe checks.
 - **Critical e2e journeys**: setup admin → enable 2FA → log out and in with TOTP;
   quick-add with syntax → file from tray; triage the Inbox by keyboard; kanban
-  drag between columns (status changes); offline capture → sync; import
-  Vikunja fixture → verify counts and completion dates; export → re-import
-  round trip.
+  drag between columns (status changes); offline capture → sync; batch upsert
+  a Vikunja-shaped fixture twice → no duplicates, completion dates intact;
+  export → batch re-import round trip.
 - **Static analysis**: `golangci-lint` (incl. `gosec`), `gofumpt`,
   `govulncheck`, `svelte-check`, ESLint, Prettier, `vacuum` (OpenAPI lint),
   `gitleaks`, `npm audit --omit=dev`.

@@ -20,7 +20,8 @@ Rules for every phase:
 - [ ] SQLite open (WAL test), goose migrations embedded, `migrate` subcommand, pre-migration backup
 - [ ] `api/openapi.yaml` skeleton (info, servers, security schemes, problem+json, pagination components, `/healthz`)
 - [ ] oapi-codegen + sqlc wired via `mise run gen`; CI verifies no diff
-- [ ] `/healthz`, `/readyz`, `/metrics`; `/api/docs` (Scalar embedded) + `/api/openapi.{yaml,json}`
+- [ ] `/healthz`, `/readyz`; `/api/docs` (Scalar embedded) + `/api/openapi.{yaml,json}`
+- [ ] OpenTelemetry SDK (§14.2): otelhttp traces, DB spans, OTLP metrics, otelslog logs, profiles; no-PII test; `docs/OBSERVABILITY.md`; local `docker compose` with an OTel Collector for dev
 - [ ] SvelteKit app in `web/` (Svelte 5, TS strict, Tailwind v4 tokens, light/dark), built into `internal/web/dist`, served with SPA fallback and security headers/CSP
 - [ ] Generated TS client; Vitest + Playwright set up with one smoke test
 - [ ] `mise` tasks: `dev`, `gen`, `lint`, `test`, `e2e`, `build`, `check`
@@ -85,7 +86,7 @@ Rules for every phase:
 
 - [ ] Notes CRUD, list/cards, pin, convert-to-task
 - [ ] Reminders (absolute + relative), scheduler with exactly-once firing tests (fake clock)
-- [ ] Overdue + security + import notifications
+- [ ] Overdue + security notifications
 - [ ] SSE hub (`/events`, tickets, Last-Event-ID replay, heartbeat) + polling fallback
 - [ ] Bell, panel, toasts; live cross-tab sync of task changes
 
@@ -97,22 +98,18 @@ Rules for every phase:
 - [ ] Service worker precache + update toast
 - [ ] IndexedDB outbox with replay triggers and error states; read cache; logout wipe
 - [ ] "Offline — view only" mode
-- [ ] Lighthouse CI budgets (§12.4)
 - [ ] Manual install checklist run on iOS Safari, macOS Safari, Android Firefox, Android Chrome (`docs/INSTALL.md`)
 
 **Exit:** airplane-mode capture syncs when back online, on iPhone and on Android Firefox.
 
-## Phase 8 — Import and export (§11)
+## Phase 8 — Bulk API and export (§11)
 
-- [ ] `blair.export.v1` JSON Schema, export JSON/CSV, import `blair` with a round-trip test
-- [ ] Import job framework: dry run, idempotent `(source, source_id)`, report, transactions, SSE progress
-- [ ] Vikunja importer (fixture from a real export, completion dates preserved)
-- [ ] Obsidian Tasks, generic CSV with mapping UI
-- [ ] Todoist, TickTick, tududi importers
-- [ ] "Migrating from X" docs with a stdlib Python script using `POST /tasks/batch` (built in Phase 3)
-- [ ] Settings → Import/Export UI with preview
+- [ ] Upsert by `(external_source, external_id)`, batch refs, name matching, `?dry_run` on all batch endpoints
+- [ ] `blair.export.v1` JSON Schema, export JSON/CSV, export → batch re-import round-trip test
+- [ ] "Migrating into Blair" agent guide with per-app mapping table + stdlib Python example
+- [ ] Settings → Data export UI
 
-**Exit:** import the live Vikunja data (open + completed, with dates) into Blair.
+**Exit:** an agent migrates the live Vikunja data (open + completed, with dates) using only the guide and the API, and a re-run creates no duplicates.
 
 ## Phase 9 — Hardening and deploy
 
@@ -120,7 +117,7 @@ Rules for every phase:
 - [ ] `/security-review` + govulncheck + npm audit clean
 - [ ] Built-in backup schedule verified with a restore drill
 - [ ] Accessibility pass (axe zero, keyboard-only walkthrough, screen reader spot check)
-- [ ] `~/docker/blair` compose + Caddy `blair.wboll.dev`; metrics token
+- [ ] `~/docker/blair` compose + Caddy `blair.wboll.dev`; OTLP endpoint wired to the chosen backend
 - [ ] Retire tududi (and later Vikunja) once Blair has been in daily use for 2 weeks
 
 **Exit:** Blair is the daily driver.
