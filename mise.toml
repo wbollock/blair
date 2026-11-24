@@ -1,0 +1,9 @@
+# Toolchain pins. Run everything through mise so local and CI versions match.
+# Build/test/lint tasks are added in Phase 1 (see docs/PLAN.md).
+[tools]
+go = "1.27.3"
+node = "24"
+
+[tasks.hooks]
+description = "Enable repo git hooks (Conventional Commits check)"
+run = "git config core.hooksPath .githooks && chmod +x .githooks/*"

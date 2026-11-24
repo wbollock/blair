@@ -1,0 +1,28 @@
+# Go
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+
+# Runtime data
+/data/
+*.db
+*.db-wal
+*.db-shm
+.env
+
+# Web
+node_modules/
+/web/.svelte-kit/
+/web/build/
+/internal/web/dist/*
+!/internal/web/dist/.gitkeep
+/web/test-results/
+/web/playwright-report/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
