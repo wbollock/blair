@@ -35,6 +35,7 @@
 	// ---- security ----
 	let curPw = $state('');
 	let newPw = $state('');
+	let newPw2 = $state('');
 	let totp = $state<Schemas['TOTPSetup'] | null>(null);
 	let qr = $state('');
 	let code = $state('');
@@ -46,7 +47,7 @@
 	async function changePassword() {
 		try {
 			await ok(api.POST('/me/password', { body: { current_password: curPw, new_password: newPw } }));
-			curPw = newPw = '';
+			curPw = newPw = newPw2 = '';
 			app.toast('Password changed. Other sessions were signed out.');
 			loadSecurity();
 		} catch (e) {
@@ -245,7 +246,11 @@
 			<h2>Password</h2>
 			<div class="field"><label class="label" for="s-cur">Current password</label><input id="s-cur" class="input" type="password" autocomplete="current-password" bind:value={curPw} /></div>
 			<div class="field"><label class="label" for="s-new">New password (12+ characters)</label><input id="s-new" class="input" type="password" autocomplete="new-password" minlength="12" bind:value={newPw} /></div>
-			<button class="btn" disabled={!curPw || newPw.length < 12} onclick={changePassword}>Change password</button>
+			<div class="field">
+				<label class="label" for="s-new2">Confirm new password</label><input id="s-new2" class="input" type="password" autocomplete="new-password" bind:value={newPw2} aria-invalid={newPw2.length > 0 && newPw2 !== newPw} />
+				{#if newPw2 && newPw2 !== newPw}<p class="muted" style="color: var(--danger)">Passwords don't match</p>{/if}
+			</div>
+			<button class="btn" disabled={!curPw || newPw.length < 12 || newPw !== newPw2} onclick={changePassword}>Change password</button>
 		</section>
 		<section>
 			<h2>Sessions</h2>
