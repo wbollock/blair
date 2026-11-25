@@ -14,6 +14,7 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import { api, ok } from '#lib/api.ts';
 	import { app, isOpen } from '#lib/state.svelte.ts';
+	import Notifications from './Notifications.svelte';
 
 	let newProject = $state('');
 	let creating = $state(false);
@@ -66,6 +67,7 @@
 <nav class="sidebar" class:open={app.sidebarOpen} aria-label="Main">
 	<div class="brand">
 		<a href="/today" onclick={close}>Blair</a>
+		<span class="desktop-only"><Notifications /></span>
 	</div>
 	{#each nav as n (n.href)}
 		<a
@@ -159,7 +161,15 @@
 		border-right: 1px solid var(--border);
 	}
 	.brand {
-		padding: 0 10px 14px;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 0 4px 14px 10px;
+	}
+	@media (max-width: 1023px) {
+		.desktop-only {
+			display: none;
+		}
 	}
 	.brand a {
 		font-family: var(--font-display);

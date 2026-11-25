@@ -321,7 +321,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/notifications/read": {
+    "/me/notifications/read": {
         parameters: {
             query?: never;
             header?: never;

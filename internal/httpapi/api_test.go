@@ -226,7 +226,7 @@ func TestEndToEndContract(t *testing.T) {
 	if notes.body["unread_count"].(float64) < 1 {
 		t.Fatalf("no reminder notification: %s", notes.raw)
 	}
-	expect(t, b.do("POST", "/api/v1/notifications/read", map[string]any{}), 204)
+	expect(t, b.do("POST", "/api/v1/me/notifications/read", map[string]any{}), 204)
 	expect(t, b.do("PATCH", "/api/v1/tasks/"+tid, map[string]any{"remind_at": nil}), 200)
 
 	inbox := b.do("POST", "/api/v1/tasks", map[string]any{"title": "Inbox thing"})

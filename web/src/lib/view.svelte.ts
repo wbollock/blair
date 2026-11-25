@@ -1,4 +1,4 @@
-import { app, type ViewInfo } from './state.svelte.ts';
+import { app, isNetworkError, type ViewInfo } from './state.svelte.ts';
 
 /** Registers the current view (for the just-added tray) and loads its tasks. */
 export function useView(info: () => ViewInfo, load: () => Promise<unknown>) {
@@ -10,10 +10,13 @@ export function useView(info: () => ViewInfo, load: () => Promise<unknown>) {
 			if (app.view === v) app.view = null;
 		};
 	});
+	let loaded = false;
 	$effect(() => {
-		loading = true;
+		void app.refreshSeq; // reload when the app comes back into view
+		loading = !loaded; // refreshes update in place without the empty-state flash
 		load()
-			.catch((e) => app.toast(e instanceof Error ? e.message : 'Could not load tasks', 'error'))
+			.then(() => (loaded = true))
+			.catch((e) => !isNetworkError(e) && app.toast(e instanceof Error ? e.message : 'Could not load tasks', 'error'))
 			.finally(() => (loading = false));
 	});
 	return {

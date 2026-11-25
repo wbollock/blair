@@ -5,6 +5,7 @@
 	import ColumnItems from './menus/ColumnItems.svelte';
 	import ProjectItems from './menus/ProjectItems.svelte';
 	import DueItems from './menus/DueItems.svelte';
+	import RemindItems from './menus/RemindItems.svelte';
 	import PriorityRow from './menus/PriorityRow.svelte';
 	import LabelItems from './menus/LabelItems.svelte';
 
@@ -57,6 +58,10 @@
 				<DropdownMenu.Sub>
 					<DropdownMenu.SubTrigger class="menu-item">Due date<span class="kbd">›</span></DropdownMenu.SubTrigger>
 					<DropdownMenu.SubContent class="menu" sideOffset={6}><DueItems {task} /></DropdownMenu.SubContent>
+				</DropdownMenu.Sub>
+				<DropdownMenu.Sub>
+					<DropdownMenu.SubTrigger class="menu-item">Remind me<span class="kbd">›</span></DropdownMenu.SubTrigger>
+					<DropdownMenu.SubContent class="menu" sideOffset={6}><RemindItems {task} /></DropdownMenu.SubContent>
 				</DropdownMenu.Sub>
 				<DropdownMenu.Separator class="menu-sep" />
 				<PriorityRow {task} />

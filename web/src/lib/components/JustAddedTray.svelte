@@ -51,7 +51,11 @@
 				<div class="top">
 					<Checkbox done={t.status === 'done' || t.status === 'cancelled'} priority={t.priority} onclick={() => app.toggleDone(t.id)} />
 					<button class="title" onclick={() => (app.drawer = t.id)}><Markdown src={t.title} inline /></button>
-					{#if t.version === 0}<span class="note">saving…</span>{/if}
+					{#if app.pending(t.id)?.error}
+						<span class="note err" title={app.pending(t.id)?.error}>couldn't sync</span>
+						<button class="note linkish" onclick={() => app.discardPending(t.id)}>Discard</button>
+					{:else if app.pending(t.id)}<span class="note">waiting to sync</span>
+					{:else if t.version === 0}<span class="note">saving…</span>{/if}
 					<button class="x" aria-label="Dismiss" onclick={() => (app.justAdded = app.justAdded.filter((x) => x !== t.id))}><X size={14} /></button>
 				</div>
 				{#if hidden}
@@ -223,5 +227,8 @@
 		.chips :global(.chip) {
 			min-height: 34px;
 		}
+	}
+	.err {
+		color: var(--danger);
 	}
 </style>

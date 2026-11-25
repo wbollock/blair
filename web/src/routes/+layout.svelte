@@ -13,6 +13,7 @@
 	import CaptureSheet from '#lib/components/CaptureSheet.svelte';
 	import Toasts from '#lib/components/Toasts.svelte';
 	import Help from '#lib/components/Help.svelte';
+	import Notifications from '#lib/components/Notifications.svelte';
 	import { focusQuickAdd } from '#lib/components/QuickAdd.svelte';
 
 	let { children }: { children: Snippet } = $props();
@@ -35,9 +36,24 @@
 			}
 		});
 		app.online = navigator.onLine;
-		addEventListener('online', () => (app.online = true));
+		addEventListener('online', () => {
+			app.online = true;
+			app.refresh();
+		});
 		addEventListener('offline', () => (app.online = false));
+		// Catch up after the app was in the background, and poll notifications while it's visible.
+		let hiddenAt = 0;
+		const onVisibility = () => {
+			if (document.visibilityState === 'hidden') hiddenAt = Date.now();
+			else if (hiddenAt && Date.now() - hiddenAt > 15_000) app.refresh();
+		};
+		document.addEventListener('visibilitychange', onVisibility);
+		const poll = setInterval(() => document.visibilityState === 'visible' && app.pollNotifications(), 30_000);
 		init();
+		return () => {
+			document.removeEventListener('visibilitychange', onVisibility);
+			clearInterval(poll);
+		};
 	});
 
 	async function init() {
@@ -49,6 +65,7 @@
 			else if (st.authenticated && PUBLIC.includes(path)) await goto('/today');
 			else if (st.authenticated && path === '/') await goto('/today');
 			if (st.authenticated && new URLSearchParams(location.search).get('capture')) app.captureOpen = true;
+			if (st.authenticated) app.pollNotifications();
 		} catch {
 			app.toast('Could not reach the server', 'error');
 		} finally {
@@ -106,8 +123,11 @@
 	<div class="shell">
 		<Sidebar />
 		<main>
-			<button class="menu-btn" aria-label="Open menu" onclick={() => (app.sidebarOpen = true)}><Menu size={20} /></button>
-			{#if !app.online}<div class="offline">You're offline. Changes won't save until you reconnect.</div>{/if}
+			<div class="top-actions">
+				<Notifications />
+				<button class="menu-btn" aria-label="Open menu" onclick={() => (app.sidebarOpen = true)}><Menu size={20} /></button>
+			</div>
+			{#if !app.online}<div class="offline">You're offline. New tasks are kept on this device and sync when you reconnect; other changes won't save.</div>{/if}
 			{@render children()}
 		</main>
 	</div>
@@ -133,7 +153,7 @@
 		padding: 30px clamp(16px, 4vw, 48px) 80px;
 		position: relative;
 	}
-	.menu-btn {
+	.top-actions {
 		display: none;
 	}
 	.offline {
@@ -144,12 +164,17 @@
 		font-size: 13px;
 	}
 	@media (max-width: 1023px) {
-		.menu-btn {
-			display: grid;
-			place-items: center;
+		.top-actions {
+			display: flex;
+			align-items: center;
+			gap: 2px;
 			position: absolute;
 			top: calc(22px + env(safe-area-inset-top));
 			right: 12px;
+		}
+		.menu-btn {
+			display: grid;
+			place-items: center;
 			width: 40px;
 			height: 40px;
 			border: 0;

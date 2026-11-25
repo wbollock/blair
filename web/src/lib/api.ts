@@ -13,6 +13,7 @@ export type ChecklistItem = Schemas['ChecklistItem'];
 export type Status = Schemas['Status'];
 export type Problem = Schemas['Problem'];
 export type AuthStatus = Schemas['AuthStatus'];
+export type Notification = Schemas['Notification'];
 
 export class ApiError extends Error {
 	constructor(

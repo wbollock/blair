@@ -3,7 +3,7 @@
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import { api, ok, type ChecklistItem, type Status } from '#lib/api.ts';
 	import { app } from '#lib/state.svelte.ts';
-	import { relativeTime } from '#lib/dates.ts';
+	import { isoToZoned, relativeTime, zonedToISO } from '#lib/dates.ts';
 	import Checkbox from './Checkbox.svelte';
 	import Markdown from './Markdown.svelte';
 
@@ -79,6 +79,17 @@
 	const statuses: Status[] = ['todo', 'doing', 'waiting', 'done', 'cancelled'];
 	const priorities = ['None', 'Low', 'Medium', 'High', 'Urgent'];
 	const project = $derived(app.project(task?.project_id));
+	// datetime-local values are wall-clock times in the account's timezone.
+	const remindLocal = $derived.by(() => {
+		if (!task?.remind_at) return '';
+		const z = isoToZoned(task.remind_at, app.tz);
+		return `${z.date}T${z.time}`;
+	});
+	function setRemind(value: string) {
+		if (!task) return;
+		const [date, time] = value.split('T');
+		app.update(task.id, { remind_at: value ? zonedToISO(date, time, app.tz) : null });
+	}
 </script>
 
 <svelte:window onkeydown={(e) => e.key === 'Escape' && app.drawer && !app.quick && close()} />
@@ -119,6 +130,12 @@
 				<div class="due">
 					<input id="d-due" type="date" class="input" value={task.due_date ?? ''} onchange={(e) => app.update(task.id, { due_date: (e.currentTarget as HTMLInputElement).value || null })} />
 					<input type="time" class="input" aria-label="Due time" disabled={!task.due_date} value={task.due_time ?? ''} onchange={(e) => app.update(task.id, { due_time: (e.currentTarget as HTMLInputElement).value || null })} />
+				</div>
+
+				<label for="d-remind">Remind me</label>
+				<div class="due">
+					<input id="d-remind" type="datetime-local" class="input" value={remindLocal} onchange={(e) => setRemind((e.currentTarget as HTMLInputElement).value)} />
+					{#if task.remind_at}<button class="clear-remind" onclick={() => setRemind('')}>Clear</button>{/if}
 				</div>
 
 				<span class="lbl">Priority</span>
@@ -264,6 +281,13 @@
 	.lbl {
 		font-size: 12.5px;
 		font-weight: 600;
+		color: var(--muted);
+	}
+	.clear-remind {
+		border: 0;
+		background: none;
+		padding: 0 4px;
+		font-size: 12px;
 		color: var(--muted);
 	}
 	.due {

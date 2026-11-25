@@ -98,7 +98,7 @@ func New(svc *service.Service, db *store.DB, cfg Config) http.Handler {
 				r.Post("/me/tokens", a.createToken)
 				r.Delete("/me/tokens/{id}", a.deleteToken)
 				r.Get("/me/audit", a.listAudit)
-				r.Post("/notifications/read", a.readNotifications)
+				r.Post("/me/notifications/read", a.readNotifications)
 			})
 			r.With(scope("account:read")).Get("/notifications", a.listNotifications)
 

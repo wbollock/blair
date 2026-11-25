@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { app } from '#lib/state.svelte.ts';
-	import { dueLabel } from '#lib/dates.ts';
+	import { dueLabel, remindLabel } from '#lib/dates.ts';
 	import type { Task } from '#lib/api.ts';
 
 	let { task, showProject = true }: { task: Task; showProject?: boolean } = $props();
@@ -25,6 +25,9 @@
 	{/each}
 	{#if showProject && project}
 		<span class="m proj"><span class="dot" style="background: {project.color || 'var(--accent)'}"></span>{project.name}{column ? ` · ${column.name}` : ''}</span>
+	{/if}
+	{#if task.remind_at && task.remind_at > new Date().toISOString() && task.status !== 'done' && task.status !== 'cancelled'}
+		<span class="m" title="Reminder">⏰ {remindLabel(task.remind_at, app.tz)}</span>
 	{/if}
 	{#if task.due_date}
 		<span class="m due" class:overdue={task.is_overdue}>{dueLabel(task.due_date, task.due_time, app.tz)}</span>

@@ -65,3 +65,35 @@ export function relativeTime(iso: string): string {
 	if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
 	return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(iso));
 }
+
+/** Milliseconds the zone is ahead of UTC at the given instant. */
+function zoneOffset(ms: number, tz: string): number {
+	const parts = new Intl.DateTimeFormat('en-US', {
+		timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'
+	}).formatToParts(new Date(ms));
+	const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+	return Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second')) - Math.floor(ms / 1000) * 1000;
+}
+
+/** A wall-clock date and time in `tz` as a UTC ISO timestamp. */
+export function zonedToISO(date: string, time: string, tz: string): string {
+	const [y, m, d] = date.split('-').map(Number);
+	const [h, mi] = time.split(':').map(Number);
+	const wall = Date.UTC(y, m - 1, d, h, mi);
+	let t = wall - zoneOffset(wall, tz);
+	t = wall - zoneOffset(t, tz); // second pass settles DST transitions
+	return new Date(t).toISOString();
+}
+
+/** A UTC timestamp as wall-clock date and time in `tz`. */
+export function isoToZoned(iso: string, tz: string): { date: string; time: string } {
+	const ms = new Date(iso).getTime();
+	const local = new Date(ms + zoneOffset(ms, tz)).toISOString();
+	return { date: local.slice(0, 10), time: local.slice(11, 16) };
+}
+
+/** "Tomorrow 9 AM" for a reminder timestamp. */
+export function remindLabel(iso: string, tz: string): string {
+	const { date, time } = isoToZoned(iso, tz);
+	return dueLabel(date, time, tz);
+}
