@@ -45,7 +45,7 @@
 		{#if mode === 'task'}
 			<div class="tray"><JustAddedTray max={3} /></div>
 			<QuickAdd autofocus compact />
-			<p class="hint">#project · /column · @label · !1–4 · “fri 9am”</p>
+			<p class="hint">#project · /column · @label · !1–4 · “fri 9am” · “every mon”</p>
 		{:else}
 			<!-- svelte-ignore a11y_autofocus -->
 			<textarea class="input note" bind:value={note} autofocus placeholder="Write it down… markdown works"></textarea>

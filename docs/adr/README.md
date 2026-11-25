@@ -12,5 +12,6 @@
 - [ADR-0010](0010-opentelemetry-observability.md): OpenTelemetry for traces, metrics, logs and profiles
 - [ADR-0011](0011-mvp-build-simplifications.md): Simplifications made while building the MVP
 - [ADR-0012](0012-lean-reminders-sync-offline.md): Lean reminders, sync and offline capture
+- [ADR-0013](0013-repeating-tasks.md): Repeating tasks roll forward in place
 
 New ADR: copy the shape of an existing one, take the next number, add it here.

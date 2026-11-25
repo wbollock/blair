@@ -28,6 +28,10 @@ went.
 - **Quick-add syntax.** `Fix gutter #homelab /doing !high fri 9am @house` sets
   the project, column, priority, due date and label. The tokens highlight as
   you type.
+- **Repeating tasks.** `Take out trash every mon,thu 7am`. Completing one moves
+  it to the next date and keeps the history.
+- **Cmd/Ctrl+K palette** with fuzzy search across tasks, projects and views, and
+  a **weekly review** page for what's unfiled, overdue, stuck or forgotten.
 - **Right-click quick actions** on any task: status, column, move to project,
   due date, priority, labels, duplicate, delete. On a phone, long-press or tap `⋯`.
 - **Kanban per project.** Columns are custom and reorderable, and each maps to

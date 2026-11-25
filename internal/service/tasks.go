@@ -12,6 +12,8 @@ import (
 
 	"github.com/wbollock/blair/internal/fracindex"
 	"github.com/wbollock/blair/internal/quickadd"
+	"github.com/wbollock/blair/internal/recur"
+	"github.com/wbollock/blair/internal/store"
 )
 
 type Task struct {
@@ -25,6 +27,7 @@ type Task struct {
 	DueDate        *string  `json:"due_date"`
 	DueTime        *string  `json:"due_time"`
 	RemindAt       *string  `json:"remind_at"`
+	Recurrence     *string  `json:"recurrence"`
 	Labels         []string `json:"labels"`
 	Position       string   `json:"position"`
 	CompletedAt    *string  `json:"completed_at"`
@@ -54,6 +57,7 @@ type TaskCreate struct {
 	DueDate        *string  `json:"due_date"`
 	DueTime        *string  `json:"due_time"`
 	RemindAt       *string  `json:"remind_at"`
+	Recurrence     *string  `json:"recurrence"`
 	Labels         []string `json:"labels"`
 	LabelNames     []string `json:"label_names"`
 	CreateMissing  bool     `json:"create_missing"`
@@ -77,6 +81,7 @@ type TaskPatch struct {
 	DueDate        Opt[string]   `json:"due_date"`
 	DueTime        Opt[string]   `json:"due_time"`
 	RemindAt       Opt[string]   `json:"remind_at"`
+	Recurrence     Opt[string]   `json:"recurrence"`
 	Labels         Opt[[]string] `json:"labels"`
 	LabelNames     Opt[[]string] `json:"label_names"`
 	CreateMissing  bool          `json:"create_missing"`
@@ -93,7 +98,7 @@ type MoveInput struct {
 	AfterID   string      `json:"after_id"`
 }
 
-const taskSelect = `SELECT t.id, t.title, t.description, t.status, t.priority, t.project_id, t.column_id, t.due_date, t.due_time, t.remind_at, t.position,
+const taskSelect = `SELECT t.id, t.title, t.description, t.status, t.priority, t.project_id, t.column_id, t.due_date, t.due_time, t.remind_at, t.recurrence, t.position,
 	t.completed_at, t.deleted_at, t.external_source, t.external_id, t.created_at, t.updated_at, t.version,
 	(SELECT count(*) FROM checklist_items c WHERE c.task_id = t.id),
 	(SELECT count(*) FROM checklist_items c WHERE c.task_id = t.id AND c.done = 1)
@@ -101,8 +106,8 @@ const taskSelect = `SELECT t.id, t.title, t.description, t.status, t.priority, t
 
 func scanTask(row interface{ Scan(...any) error }) (*Task, error) {
 	var t Task
-	var pid, cid, dd, dt, ra, ca, da, es, eid sql.NullString
-	err := row.Scan(&t.ID, &t.Title, &t.Description, &t.Status, &t.Priority, &pid, &cid, &dd, &dt, &ra, &t.Position,
+	var pid, cid, dd, dt, ra, rc, ca, da, es, eid sql.NullString
+	err := row.Scan(&t.ID, &t.Title, &t.Description, &t.Status, &t.Priority, &pid, &cid, &dd, &dt, &ra, &rc, &t.Position,
 		&ca, &da, &es, &eid, &t.CreatedAt, &t.UpdatedAt, &t.Version, &t.ChecklistTotal, &t.ChecklistDone)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -110,7 +115,7 @@ func scanTask(row interface{ Scan(...any) error }) (*Task, error) {
 	if err != nil {
 		return nil, err
 	}
-	t.ProjectID, t.ColumnID, t.DueDate, t.DueTime, t.RemindAt = strPtr(pid), strPtr(cid), strPtr(dd), strPtr(dt), strPtr(ra)
+	t.ProjectID, t.ColumnID, t.DueDate, t.DueTime, t.RemindAt, t.Recurrence = strPtr(pid), strPtr(cid), strPtr(dd), strPtr(dt), strPtr(ra), strPtr(rc)
 	t.CompletedAt, t.DeletedAt, t.ExternalSource, t.ExternalID = strPtr(ca), strPtr(da), strPtr(es), strPtr(eid)
 	t.Labels = []string{}
 	return &t, nil
@@ -359,6 +364,9 @@ func (s *Service) createTask(ctx context.Context, q querier, u *User, in TaskCre
 		if in.Priority == nil && r.Priority != nil {
 			in.Priority = r.Priority
 		}
+		if in.Recurrence == nil && r.Recurrence != "" {
+			in.Recurrence = &r.Recurrence
+		}
 		if in.DueDate == nil && r.DueDate != "" {
 			in.DueDate = &r.DueDate
 			if r.DueTime != "" {
@@ -430,6 +438,18 @@ func (s *Service) createTask(ctx context.Context, q querier, u *User, in TaskCre
 	}
 	if in.DueTime != nil && (in.DueDate == nil || !validClock(*in.DueTime)) {
 		return nil, invalid("due_time", "invalid", "due_time must be HH:MM and needs a due_date")
+	}
+	if in.Recurrence != nil {
+		rule, err := recur.Parse(*in.Recurrence)
+		if err != nil {
+			return nil, invalid("recurrence", "invalid", err.Error())
+		}
+		canon := rule.String()
+		in.Recurrence = &canon
+		if in.DueDate == nil {
+			first := s.firstOccurrence(u, rule)
+			in.DueDate = &first
+		}
 	}
 	if in.RemindAt != nil {
 		v, ok := validTimestamp(*in.RemindAt)
@@ -532,9 +552,9 @@ func (s *Service) createTask(ctx context.Context, q querier, u *User, in TaskCre
 	if err != nil {
 		return nil, err
 	}
-	_, err = q.ExecContext(ctx, `INSERT INTO tasks (id, owner_id, title, description, status, priority, project_id, column_id, due_date, due_time, remind_at, position,
-		completed_at, external_source, external_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		id, u.ID, title, in.Description, status, priority, nullStr(projID), nullStr(colID), nullStr(in.DueDate), nullStr(in.DueTime), nullStr(in.RemindAt),
+	_, err = q.ExecContext(ctx, `INSERT INTO tasks (id, owner_id, title, description, status, priority, project_id, column_id, due_date, due_time, remind_at, recurrence, position,
+		completed_at, external_source, external_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		id, u.ID, title, in.Description, status, priority, nullStr(projID), nullStr(colID), nullStr(in.DueDate), nullStr(in.DueTime), nullStr(in.RemindAt), nullStr(in.Recurrence),
 		fracindex.After(last), nullStr(completed), nullStr(in.ExternalSource), nullStr(in.ExternalID), created, now)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
@@ -616,6 +636,20 @@ func (s *Service) updateTask(ctx context.Context, q querier, u *User, id string,
 			return nil, invalid("due_time", "invalid", "due_time must be HH:MM and needs a due_date")
 		} else {
 			t.DueTime = optPtr(p.DueTime)
+		}
+	}
+	if p.Recurrence.Set {
+		if p.Recurrence.Null {
+			t.Recurrence = nil
+		} else if rule, err := recur.Parse(p.Recurrence.V); err != nil {
+			return nil, invalid("recurrence", "invalid", err.Error())
+		} else {
+			canon := rule.String()
+			t.Recurrence = &canon
+			if t.DueDate == nil {
+				first := s.firstOccurrence(u, rule)
+				t.DueDate = &first
+			}
 		}
 	}
 	if p.RemindAt.Set {
@@ -715,6 +749,14 @@ func (s *Service) updateTask(ctx context.Context, q querier, u *User, id string,
 		} // else: keep the column; card shows a status badge
 	}
 
+	// Completing a repeating task moves it to its next date instead (ADR-0013).
+	if t.Recurrence != nil && newStatus == "done" && !closedStatus(cur.Status) {
+		if err := s.rollOver(ctx, q, u, &t, proj); err != nil {
+			return nil, err
+		}
+		newStatus = "todo"
+	}
+
 	now := s.now()
 	if closedStatus(newStatus) {
 		if !closedStatus(cur.Status) {
@@ -771,10 +813,10 @@ func (s *Service) updateTask(ctx context.Context, q querier, u *User, id string,
 
 	// A new reminder time re-arms the reminder (reminded_at is cleared).
 	_, err = q.ExecContext(ctx, `UPDATE tasks SET title=?, description=?, status=?, priority=?, project_id=?, column_id=?, due_date=?, due_time=?,
-		reminded_at=CASE WHEN remind_at IS ? THEN reminded_at ELSE NULL END, remind_at=?,
+		reminded_at=CASE WHEN remind_at IS ? THEN reminded_at ELSE NULL END, remind_at=?, recurrence=?,
 		position=?, completed_at=?, external_source=?, external_id=?, updated_at=?, version=version+1 WHERE owner_id=? AND id=?`,
 		t.Title, t.Description, t.Status, t.Priority, nullStr(t.ProjectID), nullStr(t.ColumnID), nullStr(t.DueDate), nullStr(t.DueTime),
-		nullStr(t.RemindAt), nullStr(t.RemindAt),
+		nullStr(t.RemindAt), nullStr(t.RemindAt), nullStr(t.Recurrence),
 		t.Position, nullStr(t.CompletedAt), nullStr(t.ExternalSource), nullStr(t.ExternalID), now, u.ID, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
@@ -783,6 +825,52 @@ func (s *Service) updateTask(ctx context.Context, q querier, u *User, id string,
 		return nil, err
 	}
 	return s.task(ctx, q, u, id)
+}
+
+// firstOccurrence is a rule's first date on or after today in the user's timezone.
+func (s *Service) firstOccurrence(u *User, rule recur.Rule) string {
+	now := s.clock().In(u.Location())
+	return rule.Next(time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC), true).Format(time.DateOnly)
+}
+
+// rollOver logs a completion of a repeating task and moves it to its next
+// occurrence after its due date or today, whichever is later. A reminder moves
+// by the same number of days, the checklist is reset, and a project task goes
+// back to its To do column.
+func (s *Service) rollOver(ctx context.Context, q querier, u *User, t *Task, proj *Project) error {
+	rule, err := recur.Parse(*t.Recurrence)
+	if err != nil {
+		return err
+	}
+	now := s.clock().In(u.Location())
+	base := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	var oldDue time.Time
+	if t.DueDate != nil {
+		oldDue, _ = time.Parse(time.DateOnly, *t.DueDate)
+		if oldDue.After(base) {
+			base = oldDue
+		}
+	}
+	if _, err := q.ExecContext(ctx, `INSERT INTO task_completions (id, owner_id, task_id, due_date, completed_at) VALUES (?,?,?,?,?)`,
+		newID(), u.ID, t.ID, nullStr(t.DueDate), s.now()); err != nil {
+		return err
+	}
+	next := rule.Next(base, false)
+	if t.RemindAt != nil && !oldDue.IsZero() {
+		if at, err := time.Parse(time.RFC3339Nano, *t.RemindAt); err == nil {
+			shifted := store.FormatTime(at.AddDate(0, 0, int(next.Sub(oldDue).Hours()/24)))
+			t.RemindAt = &shifted
+		}
+	}
+	nd := next.Format(time.DateOnly)
+	t.DueDate = &nd
+	if proj != nil {
+		if c := columnForStatus(proj.Columns, "todo"); c != nil {
+			t.ColumnID = &c.ID
+		}
+	}
+	_, err = q.ExecContext(ctx, `UPDATE checklist_items SET done = 0 WHERE task_id = ? AND owner_id = ?`, t.ID, u.ID)
+	return err
 }
 
 func eqPtr(a, b *string) bool {

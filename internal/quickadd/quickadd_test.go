@@ -30,6 +30,7 @@ type vectorFile struct {
 			Priority   *int     `json:"priority"`
 			DueDate    string   `json:"due_date"`
 			DueTime    string   `json:"due_time"`
+			Recurrence string   `json:"recurrence"`
 			Labels     []string `json:"labels"`
 			Error      string   `json:"error"`
 		} `json:"expect"`
@@ -88,6 +89,7 @@ func TestSharedVectors(t *testing.T) {
 			check("column_new", got.ColumnNew, c.Expect.ColumnNew)
 			check("due_date", got.DueDate, c.Expect.DueDate)
 			check("due_time", got.DueTime, c.Expect.DueTime)
+			check("recurrence", got.Recurrence, c.Expect.Recurrence)
 			if (got.Priority == nil) != (c.Expect.Priority == nil) || (got.Priority != nil && *got.Priority != *c.Expect.Priority) {
 				t.Errorf("priority = %v, want %v", got.Priority, c.Expect.Priority)
 			}

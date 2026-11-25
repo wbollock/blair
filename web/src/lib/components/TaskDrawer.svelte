@@ -4,6 +4,7 @@
 	import { api, ok, type ChecklistItem, type Status } from '#lib/api.ts';
 	import { app } from '#lib/state.svelte.ts';
 	import { isoToZoned, relativeTime, zonedToISO } from '#lib/dates.ts';
+	import { ruleLabel } from '#lib/recur.ts';
 	import Checkbox from './Checkbox.svelte';
 	import Markdown from './Markdown.svelte';
 
@@ -85,6 +86,15 @@
 		const z = isoToZoned(task.remind_at, app.tz);
 		return `${z.date}T${z.time}`;
 	});
+	// Repeat presets follow the due date (weekday, day of month); other rules show as-is.
+	const repeatOptions = $derived.by(() => {
+		const due = task?.due_date ?? app.today;
+		const [y, m, d] = due.split('-').map(Number);
+		const wd = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'][new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+		const rules = ['FREQ=DAILY', 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', `FREQ=WEEKLY;BYDAY=${wd}`, 'FREQ=WEEKLY;INTERVAL=2', `FREQ=MONTHLY;BYMONTHDAY=${d}`, 'FREQ=YEARLY'];
+		if (task?.recurrence && !rules.includes(task.recurrence)) rules.push(task.recurrence);
+		return rules.map((r) => ({ value: r, label: ruleLabel(r) }));
+	});
 	function setRemind(value: string) {
 		if (!task) return;
 		const [date, time] = value.split('T');
@@ -131,6 +141,12 @@
 					<input id="d-due" type="date" class="input" value={task.due_date ?? ''} onchange={(e) => app.update(task.id, { due_date: (e.currentTarget as HTMLInputElement).value || null })} />
 					<input type="time" class="input" aria-label="Due time" disabled={!task.due_date} value={task.due_time ?? ''} onchange={(e) => app.update(task.id, { due_time: (e.currentTarget as HTMLInputElement).value || null })} />
 				</div>
+
+				<label for="d-repeat">Repeat</label>
+				<select id="d-repeat" class="input" value={task.recurrence ?? ''} onchange={(e) => app.update(task.id, { recurrence: (e.currentTarget as HTMLSelectElement).value || null })}>
+					<option value="">Doesn't repeat</option>
+					{#each repeatOptions as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
+				</select>
 
 				<label for="d-remind">Remind me</label>
 				<div class="due">

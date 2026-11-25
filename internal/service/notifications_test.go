@@ -71,3 +71,50 @@ func TestSecurityNotifications(t *testing.T) {
 		t.Fatalf("notifications = %+v", page.Data)
 	}
 }
+
+func TestRepeatingTaskRollsOver(t *testing.T) {
+	f := newFixture(t) // 2026-11-24 14:30 in New York (a Tuesday)
+	u := f.user(t, "a@example.com")
+	p := must(f.s.CreateProject(f.ctx, u, ProjectCreate{Name: "Home"}))
+	r := must(f.s.CreateTask(f.ctx, u, TaskCreate{QuickAdd: "Take out trash every mon,thu 7am #home"}))
+	tk := r.Task
+	if *tk.Recurrence != "FREQ=WEEKLY;BYDAY=MO,TH" || *tk.DueDate != "2026-11-26" || *tk.DueTime != "07:00" {
+		t.Fatalf("created %+v", tk)
+	}
+	remind := "2026-11-26T11:45:00Z"
+	must(f.s.UpdateTask(f.ctx, u, tk.ID, TaskPatch{RemindAt: Some(remind)}, 0))
+	must(f.s.CreateChecklistItem(f.ctx, u, tk.ID, ChecklistCreate{Text: "Recycling too"}))
+	items := must(f.s.ListChecklist(f.ctx, u, tk.ID))
+	must(f.s.UpdateChecklistItem(f.ctx, u, items[0].ID, ChecklistPatch{Done: Some(true)}))
+
+	// Completing it early (Tuesday) moves it to the occurrence after its due date.
+	done := must(f.s.UpdateTask(f.ctx, u, tk.ID, TaskPatch{ColumnID: Some(colByName(p, "Done").ID)}, 0))
+	if done.Status != "todo" || *done.DueDate != "2026-11-30" || *done.ColumnID != colByName(p, "To do").ID || done.CompletedAt != nil {
+		t.Fatalf("after completion: status=%s due=%v col=%v completed=%v", done.Status, *done.DueDate, *done.ColumnID, done.CompletedAt)
+	}
+	if *done.RemindAt != "2026-11-30T11:45:00.000Z" {
+		t.Fatalf("reminder moved to %s", *done.RemindAt)
+	}
+	if items := must(f.s.ListChecklist(f.ctx, u, tk.ID)); items[0].Done {
+		t.Fatal("checklist was not reset")
+	}
+	var n int
+	if err := f.s.db.R.QueryRowContext(f.ctx, `SELECT count(*) FROM task_completions WHERE task_id = ? AND due_date = '2026-11-26'`, tk.ID).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("completions = %d, %v", n, err)
+	}
+
+	// Long overdue: the next date is after today, not after the old due date.
+	must(f.s.UpdateTask(f.ctx, u, tk.ID, TaskPatch{DueDate: Some("2026-11-02")}, 0))
+	if d := must(f.s.UpdateTask(f.ctx, u, tk.ID, TaskPatch{Status: Some("done")}, 0)); *d.DueDate != "2026-11-26" {
+		t.Fatalf("overdue rolled to %s", *d.DueDate)
+	}
+	// Cancelling ends the series; removing the rule makes done final.
+	if c := must(f.s.UpdateTask(f.ctx, u, tk.ID, TaskPatch{Status: Some("cancelled")}, 0)); c.Status != "cancelled" {
+		t.Fatalf("cancel gave %s", c.Status)
+	}
+	if _, err := f.s.CreateTask(f.ctx, u, TaskCreate{Title: "Bad", Recurrence: ptr("FREQ=HOURLY")}); err == nil {
+		t.Fatal("accepted an unsupported rule")
+	}
+}
+
+func ptr[T any](v T) *T { return &v }

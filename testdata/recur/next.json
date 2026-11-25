@@ -1,0 +1,34 @@
+{
+  "$comment": "Executable spec for repeat rules (ADR-0013). Both internal/recur (Go) and web/src/lib/recur.ts must pass. next(rule, from, inclusive): the first occurrence on or after (inclusive) or strictly after 'from'. Weeks start on Monday for INTERVAL>1 with BYDAY.",
+  "next": [
+    { "rule": "FREQ=DAILY", "from": "2026-11-24", "inclusive": false, "want": "2026-11-25" },
+    { "rule": "FREQ=DAILY;INTERVAL=3", "from": "2026-11-24", "inclusive": true, "want": "2026-11-24" },
+    { "rule": "FREQ=DAILY;INTERVAL=3", "from": "2026-11-24", "inclusive": false, "want": "2026-11-27" },
+    { "rule": "FREQ=WEEKLY", "from": "2026-11-24", "inclusive": false, "want": "2026-12-01" },
+    { "rule": "FREQ=WEEKLY;INTERVAL=2", "from": "2026-11-27", "inclusive": false, "want": "2026-12-11" },
+    { "rule": "FREQ=WEEKLY;BYDAY=MO,TH", "from": "2026-11-24", "inclusive": false, "want": "2026-11-26" },
+    { "rule": "FREQ=WEEKLY;BYDAY=MO,TH", "from": "2026-11-26", "inclusive": false, "want": "2026-11-30" },
+    { "rule": "FREQ=WEEKLY;BYDAY=MO,TH", "from": "2026-11-26", "inclusive": true, "want": "2026-11-26" },
+    { "rule": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR", "from": "2026-11-27", "inclusive": false, "want": "2026-11-30" },
+    { "rule": "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO", "from": "2026-11-30", "inclusive": false, "want": "2026-12-14" },
+    { "rule": "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,FR", "from": "2026-11-30", "inclusive": false, "want": "2026-12-04" },
+    { "rule": "FREQ=MONTHLY", "from": "2026-11-24", "inclusive": false, "want": "2026-12-24" },
+    { "rule": "FREQ=MONTHLY;INTERVAL=3", "from": "2026-11-30", "inclusive": false, "want": "2027-02-28" },
+    { "rule": "FREQ=MONTHLY;BYMONTHDAY=1", "from": "2026-11-24", "inclusive": true, "want": "2026-12-01" },
+    { "rule": "FREQ=MONTHLY;BYMONTHDAY=1", "from": "2026-12-01", "inclusive": true, "want": "2026-12-01" },
+    { "rule": "FREQ=MONTHLY;BYMONTHDAY=31", "from": "2026-11-30", "inclusive": false, "want": "2026-12-31" },
+    { "rule": "FREQ=MONTHLY;BYMONTHDAY=31", "from": "2027-01-31", "inclusive": false, "want": "2027-02-28" },
+    { "rule": "FREQ=MONTHLY;BYMONTHDAY=31", "from": "2027-02-28", "inclusive": false, "want": "2027-03-31" },
+    { "rule": "FREQ=YEARLY", "from": "2028-02-29", "inclusive": false, "want": "2029-02-28" }
+  ],
+  "canonical": [
+    { "in": "freq=weekly;byday=th,mo", "want": "FREQ=WEEKLY;BYDAY=MO,TH" },
+    { "in": "FREQ=DAILY;INTERVAL=1", "want": "FREQ=DAILY" },
+    { "in": "BYMONTHDAY=15;FREQ=MONTHLY;INTERVAL=2", "want": "FREQ=MONTHLY;INTERVAL=2;BYMONTHDAY=15" },
+    { "in": "FREQ=HOURLY", "error": true },
+    { "in": "FREQ=DAILY;BYDAY=MO", "error": true },
+    { "in": "FREQ=MONTHLY;BYMONTHDAY=32", "error": true },
+    { "in": "FREQ=WEEKLY;COUNT=3", "error": true },
+    { "in": "FREQ=DAILY;INTERVAL=0", "error": true }
+  ]
+}

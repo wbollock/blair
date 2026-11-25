@@ -29,6 +29,7 @@ describe('shared quick-add vectors', () => {
 			expect(r.priority).toBe(e.priority);
 			expect(r.dueDate ?? '').toBe(e.due_date ?? '');
 			expect(r.dueTime ?? '').toBe(e.due_time ?? '');
+			expect(r.recurrence ?? '').toBe(e.recurrence ?? '');
 			expect(r.labels).toEqual(e.labels ?? []);
 			for (const t of r.tokens) expect(c.input.slice(t.start, t.end)).toBe(t.text);
 		});

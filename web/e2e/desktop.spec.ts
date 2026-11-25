@@ -73,6 +73,14 @@ test('setup, 2FA, quick-add, tray, quick actions, board', async ({ page }) => {
 	}
 	await expect(page.getByText('Overdue')).toBeVisible();
 
+	// A repeating task moves to its next date when completed (ADR-0013).
+	await qa.fill('Water plants every day');
+	await qa.press('Enter');
+	const plants = page.locator('[role=list] [data-task-id]').filter({ hasText: 'Water plants' });
+	await expect(plants).toContainText('↻ day');
+	await plants.getByRole('button', { name: 'Complete' }).click();
+	await expect(page.getByText(/Done · next Tomorrow/)).toBeVisible();
+
 	// Right-click quick actions: move to a column via the submenu (§5.5 #7).
 	const row = page.locator('[role=list] [data-task-id]').filter({ hasText: 'Renew wildcard cert' });
 	await row.click({ button: 'right' });

@@ -1121,6 +1121,11 @@ export interface components {
              * @description When to show an in-app reminder. One per task; changing it re-arms the reminder.
              */
             remind_at: string | null;
+            /**
+             * @description Repeat rule, a subset of RFC 5545 RRULE: FREQ=DAILY|WEEKLY|MONTHLY|YEARLY, optional INTERVAL (1–365), BYDAY (weekly) and BYMONTHDAY (monthly), e.g. FREQ=WEEKLY;BYDAY=MO,TH. Marking a repeating task done logs the completion and moves it to its next date; cancelled ends the series.
+             * @example FREQ=WEEKLY;BYDAY=MO
+             */
+            recurrence: string | null;
             labels: string[];
             position: string;
             /** Format: date-time */
@@ -1164,6 +1169,8 @@ export interface components {
             due_time?: string | null;
             /** Format: date-time */
             remind_at?: string | null;
+            /** @description See Task.recurrence. Without a due_date, the task starts at the rule's first date from today. */
+            recurrence?: string | null;
             labels?: string[];
             label_names?: string[];
             /** @description Create unknown projects/labels named in the request */
@@ -1197,6 +1204,8 @@ export interface components {
              * @description null removes the reminder
              */
             remind_at?: string | null;
+            /** @description null stops repeating */
+            recurrence?: string | null;
             labels?: string[] | null;
             label_names?: string[] | null;
             create_missing?: boolean;
@@ -1287,7 +1296,7 @@ export interface components {
         };
         QuickAddToken: {
             /** @enum {string} */
-            kind: "project" | "column" | "label" | "priority" | "date";
+            kind: "project" | "column" | "label" | "priority" | "date" | "repeat";
             text: string;
             /** @description Byte offset into the input */
             start: number;
@@ -1306,6 +1315,8 @@ export interface components {
             /** Format: date */
             due_date?: string;
             due_time?: string;
+            /** @description Canonical repeat rule from an "every …" phrase */
+            recurrence?: string;
             labels?: string[];
             labels_new?: string[];
             tokens: components["schemas"]["QuickAddToken"][];

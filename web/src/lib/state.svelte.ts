@@ -1,6 +1,6 @@
 import { goto } from '$app/navigation';
 import { api, ApiError, ok, uuidv7, type AuthStatus, type Label, type Me, type Notification, type Project, type Status, type Task } from './api.ts';
-import { today } from './dates.ts';
+import { dueLabel, today } from './dates.ts';
 import { parseQuickAdd, type QAResult } from './quickadd.ts';
 
 /** The current view registers how it filters tasks, so the just-added tray can
@@ -22,7 +22,7 @@ export interface Toast {
 	actions: { label: string; run: () => void }[];
 }
 
-export type TaskPatch = Partial<Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'project_id' | 'column_id' | 'due_date' | 'due_time' | 'remind_at' | 'labels'>>;
+export type TaskPatch = Partial<Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'project_id' | 'column_id' | 'due_date' | 'due_time' | 'remind_at' | 'recurrence' | 'labels'>>;
 
 /** A task created while offline, waiting to be sent (SPEC §12.3). */
 export interface Pending {
@@ -333,7 +333,7 @@ class AppState {
 			project_id: proj?.id ?? null, column_id: col?.id ?? null, due_date: parsed.dueDate ?? (body.due_date as string) ?? null,
 			due_time: parsed.dueTime ?? null, labels: (body.labels as string[]) ?? this.labels.filter((l) => parsed.labels.includes(l.name)).map((l) => l.id),
 			position: '~', completed_at: null, deleted_at: null, external_source: null, external_id: null, created_at: now, updated_at: now,
-			version: 0, checklist_total: 0, checklist_done: 0, is_overdue: false, remind_at: null
+			version: 0, checklist_total: 0, checklist_done: 0, is_overdue: false, remind_at: null, recurrence: parsed.recurrence ?? null
 		});
 		this.justAdded = [id, ...this.justAdded.filter((x) => x !== id)].slice(0, 8);
 		if (opts.open) this.drawer = id;
@@ -434,6 +434,15 @@ class AppState {
 		const t = this.tasks[id];
 		if (!t) return;
 		const done = t.status === 'done' || t.status === 'cancelled';
+		if (!done && t.recurrence && !this.pending(id)) {
+			// The server logs the completion and moves the task to its next date (ADR-0013).
+			const prev = { due_date: t.due_date, due_time: t.due_time, remind_at: t.remind_at };
+			const next = await this.update(id, { status: 'done' });
+			if (next?.due_date && next.due_date !== prev.due_date) {
+				this.toast(`Done · next ${dueLabel(next.due_date, next.due_time, this.tz)}`, 'info', [{ label: 'Undo', run: () => this.update(id, prev) }]);
+			}
+			return;
+		}
 		await this.update(id, { status: done ? 'todo' : 'done' }, { undo: done ? 'Reopened' : 'Completed' });
 	}
 

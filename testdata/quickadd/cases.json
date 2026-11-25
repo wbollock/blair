@@ -228,6 +228,99 @@
       "expect": {
         "error": "empty_title"
       }
+    },
+    {
+      "name": "repeat every day defaults due to today",
+      "input": "Water plants every day",
+      "expect": {
+        "title": "Water plants",
+        "recurrence": "FREQ=DAILY",
+        "due_date": "2026-11-24"
+      }
+    },
+    {
+      "name": "repeat on weekdays with a time",
+      "input": "Standup every weekday 9:30",
+      "expect": {
+        "title": "Standup",
+        "recurrence": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+        "due_date": "2026-11-24",
+        "due_time": "09:30"
+      }
+    },
+    {
+      "name": "repeat on a weekday",
+      "input": "Take out trash every mon @house",
+      "expect": {
+        "title": "Take out trash",
+        "recurrence": "FREQ=WEEKLY;BYDAY=MO",
+        "due_date": "2026-11-30",
+        "labels": [
+          "house"
+        ]
+      }
+    },
+    {
+      "name": "repeat on several weekdays",
+      "input": "Gym every mon,thu 7am",
+      "expect": {
+        "title": "Gym",
+        "recurrence": "FREQ=WEEKLY;BYDAY=MO,TH",
+        "due_date": "2026-11-26",
+        "due_time": "07:00"
+      }
+    },
+    {
+      "name": "repeat on a day of the month",
+      "input": "Pay rent every 1st !high",
+      "expect": {
+        "title": "Pay rent",
+        "recurrence": "FREQ=MONTHLY;BYMONTHDAY=1",
+        "due_date": "2026-12-01",
+        "priority": 3
+      }
+    },
+    {
+      "name": "repeat every n units",
+      "input": "Change furnace filter every 3 months",
+      "expect": {
+        "title": "Change furnace filter",
+        "recurrence": "FREQ=MONTHLY;INTERVAL=3",
+        "due_date": "2026-11-24"
+      }
+    },
+    {
+      "name": "repeat every other week from an explicit date",
+      "input": "1:1 with Sam every other week fri at 2pm",
+      "expect": {
+        "title": "1:1 with Sam",
+        "recurrence": "FREQ=WEEKLY;INTERVAL=2",
+        "due_date": "2026-11-27",
+        "due_time": "14:00"
+      }
+    },
+    {
+      "name": "repeat yearly",
+      "input": "Renew domain every year",
+      "expect": {
+        "title": "Renew domain",
+        "recurrence": "FREQ=YEARLY",
+        "due_date": "2026-11-24"
+      }
+    },
+    {
+      "name": "every that is not a schedule stays in the title",
+      "input": "Check every box",
+      "expect": {
+        "title": "Check every box"
+      }
+    },
+    {
+      "name": "escaped every stays in the title",
+      "input": "Read \\every day",
+      "expect": {
+        "title": "Read every day"
+      }
     }
   ]
 }

@@ -1,6 +1,8 @@
 // Quick-add parser (SPEC §5.1). Mirrors internal/quickadd/quickadd.go; both must
 // pass testdata/quickadd/cases.json. Token offsets here are UTF-16 indices.
 
+import { nextDate, phrase, ruleString, type Rule } from './recur.ts';
+
 export interface QAProject {
 	name: string;
 	columns: string[];
@@ -15,7 +17,7 @@ export interface QAContext {
 	currentProject?: string;
 }
 
-export type TokenKind = 'project' | 'column' | 'label' | 'priority' | 'date';
+export type TokenKind = 'project' | 'column' | 'label' | 'priority' | 'date' | 'repeat';
 
 export interface QAToken {
 	kind: TokenKind;
@@ -35,6 +37,8 @@ export interface QAResult {
 	priority?: number;
 	dueDate?: string;
 	dueTime?: string;
+	/** Canonical repeat rule (recur.ts). */
+	recurrence?: string;
 	labels: string[];
 	labelsNew: string[];
 	tokens: QAToken[];
@@ -261,6 +265,8 @@ export function parseQuickAdd(input: string, ctx: QAContext): QAResult {
 	const res: QAResult = { title: '', labels: [], labelsNew: [], tokens: [] };
 	let columnWord = -1;
 	let project: QAProject | undefined;
+	let rule: Rule | undefined;
+	let repeatTime = '';
 
 	const tok = (kind: TokenKind, from: number, to: number, value: string) => {
 		res.tokens.push({ kind, text: input.slice(words[from].start, words[to].end), start: words[from].start, end: words[to].end, value });
@@ -313,6 +319,23 @@ export function parseQuickAdd(input: string, ctx: QAContext): QAResult {
 			if (p !== undefined) {
 				res.priority = p;
 				tok('priority', i, i, String(p));
+			}
+			continue;
+		}
+		// "every <schedule>" sets a repeat rule, plus a time when one follows.
+		if (lw === 'every' && !res.recurrence) {
+			const r = phrase(lowerFrom(words, i + 1));
+			if (r.n && !used.slice(i + 1, i + 1 + r.n).some(Boolean)) {
+				let last = i + r.n;
+				const t = matchTime(lowerFrom(words, last + 1));
+				if (t) {
+					repeatTime = t.time;
+					last += t.n;
+				}
+				rule = r.rule;
+				res.recurrence = ruleString(r.rule);
+				tok('repeat', i, last, res.recurrence);
+				i = last;
 			}
 			continue;
 		}
@@ -369,6 +392,12 @@ export function parseQuickAdd(input: string, ctx: QAContext): QAResult {
 			tok('column', columnWord, columnWord, res.columnNew);
 		}
 	}
+
+	// A repeating task without a date starts at its first occurrence from today.
+	if (rule && !res.dueDate) {
+		res.dueDate = nextDate(rule, today.toString(), true);
+		if (repeatTime) res.dueTime = repeatTime;
+	} else if (repeatTime && !res.dueTime) res.dueTime = repeatTime;
 
 	res.title = words.filter((_, i) => !used[i]).map((w) => w.text).join(' ');
 	if (!res.title.trim()) res.error = 'empty_title';

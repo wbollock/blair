@@ -1601,7 +1601,7 @@ components:
     Task:
       type: object
       required: [id, title, description, status, priority, project_id, column_id, due_date, due_time, labels, position, completed_at, deleted_at,
-        external_source, external_id, created_at, updated_at, version, checklist_total, checklist_done, is_overdue, remind_at]
+        external_source, external_id, created_at, updated_at, version, checklist_total, checklist_done, is_overdue, remind_at, recurrence]
       properties:
         id: { type: string, format: uuid }
         title: { type: string, description: "Inline markdown (bold, italic, code, strike, links)" }
@@ -1613,6 +1613,7 @@ components:
         due_date: { type: string, format: date, nullable: true }
         due_time: { type: string, nullable: true, example: "09:00" }
         remind_at: { type: string, format: date-time, nullable: true, description: "When to show an in-app reminder. One per task; changing it re-arms the reminder." }
+        recurrence: { type: string, nullable: true, example: "FREQ=WEEKLY;BYDAY=MO", description: "Repeat rule, a subset of RFC 5545 RRULE: FREQ=DAILY|WEEKLY|MONTHLY|YEARLY, optional INTERVAL (1–365), BYDAY (weekly) and BYMONTHDAY (monthly), e.g. FREQ=WEEKLY;BYDAY=MO,TH. Marking a repeating task done logs the completion and moves it to its next date; cancelled ends the series." }
         labels: { type: array, items: { type: string, format: uuid } }
         position: { type: string }
         completed_at: { type: string, format: date-time, nullable: true }
@@ -1649,6 +1650,7 @@ components:
             due_date: { type: string, format: date, nullable: true }
             due_time: { type: string, nullable: true }
             remind_at: { type: string, format: date-time, nullable: true }
+            recurrence: { type: string, nullable: true, description: "See Task.recurrence. Without a due_date, the task starts at the rule's first date from today." }
             labels: { type: array, items: { type: string, format: uuid } }
             label_names: { type: array, items: { type: string } }
             create_missing: { type: boolean, description: Create unknown projects/labels named in the request }
@@ -1671,6 +1673,7 @@ components:
             due_date: { type: string, format: date, nullable: true }
             due_time: { type: string, nullable: true }
             remind_at: { type: string, format: date-time, nullable: true, description: null removes the reminder }
+            recurrence: { type: string, nullable: true, description: null stops repeating }
             labels: { type: array, items: { type: string, format: uuid }, nullable: true }
             label_names: { type: array, items: { type: string }, nullable: true }
             create_missing: { type: boolean }
@@ -1760,7 +1763,7 @@ components:
       type: object
       required: [kind, text, start, end, value]
       properties:
-        kind: { type: string, enum: [project, column, label, priority, date] }
+        kind: { type: string, enum: [project, column, label, priority, date, repeat] }
         text: { type: string }
         start: { type: integer, description: Byte offset into the input }
         end: { type: integer }
@@ -1777,6 +1780,7 @@ components:
         priority: { type: integer }
         due_date: { type: string, format: date }
         due_time: { type: string }
+        recurrence: { type: string, description: Canonical repeat rule from an "every …" phrase }
         labels: { type: array, items: { type: string } }
         labels_new: { type: array, items: { type: string } }
         tokens: { type: array, items: { $ref: "#/components/schemas/QuickAddToken" } }

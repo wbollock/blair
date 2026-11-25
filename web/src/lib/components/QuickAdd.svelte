@@ -181,7 +181,7 @@
 		</ul>
 	{:else if focused && !compact}
 		<div class="hint">
-			<span><b>#</b>project</span><span><b>/</b>column</span><span><b>@</b>label</span><span><b>!</b>1–4</span><span>“fri 9am”</span>
+			<span><b>#</b>project</span><span><b>/</b>column</span><span><b>@</b>label</span><span><b>!</b>1–4</span><span>“fri 9am”</span><span>“every mon”</span>
 			<span class="sp"></span><span>↵ add</span><span>⇧↵ add &amp; open</span>
 		</div>
 	{/if}

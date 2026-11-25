@@ -308,6 +308,7 @@ This section has the strictest acceptance criteria in the spec.
 | `!1`–`!4`, `!low` `!med` `!high` `!urgent` | Priority | `!high` |
 | Natural date | `today`, `tonight`, `tomorrow`/`tmr`, `yesterday`, weekday names, `next fri`, `in 3 days`, `in 2w`, `jun 3`, `3 jun`, `6/3`, `2027-06-03`, optional `at 5pm` / `17:00` | `fri at 9am` |
 | `due:` | Explicit date prefix when natural detection is ambiguous | `due:may 4` |
+| `every …` | Repeat rule (ADR-0013): `every day`, `every weekday`, `every mon,thu`, `every other week`, `every 3 months`, `every 15th`, `every year`, optional time. Without a date, the task starts at the first occurrence from today. | `every mon 7am` |
 | `\` | Escape the next token so it stays literal text | `\#1 fan` |
 
   Natural-date detection is **highlighted, not silent**. The detected phrase

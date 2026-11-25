@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/wbollock/blair/internal/recur"
 )
 
 // ErrEmptyTitle is returned when only tokens were entered.
@@ -33,7 +35,7 @@ type Context struct {
 
 // Token is one recognized piece of syntax, with byte offsets into the input.
 type Token struct {
-	Kind  string `json:"kind"` // project, column, label, priority, date
+	Kind  string `json:"kind"` // project, column, label, priority, date, repeat
 	Text  string `json:"text"`
 	Start int    `json:"start"`
 	End   int    `json:"end"`
@@ -49,6 +51,7 @@ type Result struct {
 	Priority   *int     `json:"priority,omitempty"`
 	DueDate    string   `json:"due_date,omitempty"`
 	DueTime    string   `json:"due_time,omitempty"`
+	Recurrence string   `json:"recurrence,omitempty"` // canonical RRULE subset (internal/recur)
 	Labels     []string `json:"labels,omitempty"`
 	LabelsNew  []string `json:"labels_new,omitempty"`
 	Tokens     []Token  `json:"tokens"`
@@ -137,6 +140,8 @@ func Parse(input string, ctx Context) (Result, error) {
 	res := Result{Tokens: []Token{}}
 	var columnWord = -1
 	var project *Project
+	var rule recur.Rule
+	var repeatTime string
 
 	tok := func(kind string, from, to int, value string) {
 		res.Tokens = append(res.Tokens, Token{Kind: kind, Text: input[words[from].start:words[to].end], Start: words[from].start, End: words[to].end, Value: value})
@@ -188,6 +193,19 @@ func Parse(input string, ctx Context) (Result, error) {
 			if p, ok := priorities[lw[1:]]; ok {
 				res.Priority = &p
 				tok("priority", i, i, strconv.Itoa(p))
+			}
+			continue
+		}
+		// "every <schedule>" sets a repeat rule, plus a time when one follows.
+		if lw == "every" && res.Recurrence == "" {
+			if r, n := recur.Phrase(lowerFrom(words, i+1)); n > 0 && !anyUsed(used, i+1, i+1+n) {
+				last := i + n
+				if t2, m := matchTime(lowerFrom(words, last+1)); m > 0 {
+					repeatTime, last = t2, last+m
+				}
+				rule, res.Recurrence = r, r.String()
+				tok("repeat", i, last, res.Recurrence)
+				i = last
 			}
 			continue
 		}
@@ -246,6 +264,14 @@ func Parse(input string, ctx Context) (Result, error) {
 			res.ColumnNew = words[columnWord].text[1:]
 			tok("column", columnWord, columnWord, res.ColumnNew)
 		}
+	}
+
+	// A repeating task without a date starts at its first occurrence from today.
+	if res.Recurrence != "" && res.DueDate == "" {
+		res.DueDate = rule.Next(time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC), true).Format(time.DateOnly)
+		res.DueTime = repeatTime
+	} else if repeatTime != "" && res.DueTime == "" {
+		res.DueTime = repeatTime
 	}
 
 	var title []string
