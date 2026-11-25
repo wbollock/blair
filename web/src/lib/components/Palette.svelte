@@ -55,7 +55,8 @@
 				run: () => (app.drawer = t.id)
 			}));
 		// With no query, show navigation; tasks appear once you type.
-		return query.trim() ? [...views, ...projects, ...labels, ...actions, ...tasks] : [...views, ...projects, ...actions];
+		const nav = app.planEnabled ? [{ kind: 'Go to', label: 'Plan today', run: go('/plan') } as Item, ...views] : views;
+		return query.trim() ? [...nav, ...projects, ...labels, ...actions, ...tasks] : [...nav, ...projects, ...actions];
 	});
 	const results = $derived(rank(query, items, (i) => i.label, 40));
 	$effect(() => {

@@ -40,6 +40,9 @@
 			<DropdownMenu.Content class="menu" customAnchor={anchor} side="bottom" align="start" sideOffset={4} collisionPadding={8} aria-label="Quick actions">
 				<DropdownMenu.Item class="menu-item" onSelect={() => (app.drawer = task.id)}>Open<span class="kbd">↵</span></DropdownMenu.Item>
 				<DropdownMenu.Item class="menu-item" onSelect={() => app.toggleDone(task.id)}>{closed ? 'Reopen' : 'Complete'}<span class="kbd">X</span></DropdownMenu.Item>
+				{#if app.planEnabled}
+					<DropdownMenu.Item class="menu-item" onSelect={() => app.togglePlan(task.id)}>{app.inPlan(task.id) ? "Remove from today's plan" : "Add to today's plan"}<span class="kbd">P</span></DropdownMenu.Item>
+				{/if}
 				<DropdownMenu.Separator class="menu-sep" />
 				<DropdownMenu.Sub>
 					<DropdownMenu.SubTrigger class="menu-item">Status<span class="kbd">›</span></DropdownMenu.SubTrigger>

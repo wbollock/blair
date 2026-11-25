@@ -55,6 +55,7 @@
 		const k = e.key;
 		if (k === 'Enter') app.drawer = task.id;
 		else if (k === 'x') app.toggleDone(task.id);
+		else if (k === 'p' && app.planEnabled) app.togglePlan(task.id);
 		else if (k === '.' || (k === 'F10' && e.shiftKey) || k === 'ContextMenu') {
 			const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
 			openMenuAt(r.left + 40, r.bottom);

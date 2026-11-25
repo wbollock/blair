@@ -30,6 +30,9 @@
 	{#if task.remind_at && task.remind_at > new Date().toISOString() && task.status !== 'done' && task.status !== 'cancelled'}
 		<span class="m" title="Reminder">⏰ {remindLabel(task.remind_at, app.tz)}</span>
 	{/if}
+	{#if app.planEnabled && app.inPlan(task.id)}
+		<span class="m planned" title="In today's plan">◉ planned</span>
+	{/if}
 	{#if task.recurrence}
 		<span class="m" title={ruleLabel(task.recurrence)}>↻ {ruleLabel(task.recurrence).replace(/^Every /, '')}</span>
 	{/if}
@@ -66,5 +69,8 @@
 		border-radius: 4px;
 		background: var(--chip);
 		font-size: 11px;
+	}
+	.planned {
+		color: var(--accent-ink);
 	}
 </style>

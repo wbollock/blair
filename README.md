@@ -32,6 +32,8 @@ went.
   it to the next date and keeps the history.
 - **Cmd/Ctrl+K palette** with fuzzy search across tasks, projects and views, and
   a **weekly review** page for what's unfiled, overdue, stuck or forgotten.
+- **Optional daily plan.** Pick today's tasks, copy them for standup, and see
+  what keeps slipping. Scripts can use it too ([docs/daily-plan.md](docs/daily-plan.md)).
 - **Right-click quick actions** on any task: status, column, move to project,
   due date, priority, labels, duplicate, delete. On a phone, long-press or tap `⋯`.
 - **Kanban per project.** Columns are custom and reorderable, and each maps to

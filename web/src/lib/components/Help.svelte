@@ -11,6 +11,7 @@
 		['Right-click or .', 'Quick actions on a task'],
 		['j / k', 'Move between tasks'],
 		['x', 'Complete'],
+		['p', "Add to / remove from today's plan (when the daily plan is on)"],
 		['0 – 4', 'Set priority'],
 		['Enter', 'Open task'],
 		['Delete', 'Move to trash'],

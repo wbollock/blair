@@ -13,5 +13,6 @@
 - [ADR-0011](0011-mvp-build-simplifications.md): Simplifications made while building the MVP
 - [ADR-0012](0012-lean-reminders-sync-offline.md): Lean reminders, sync and offline capture
 - [ADR-0013](0013-repeating-tasks.md): Repeating tasks roll forward in place
+- [ADR-0014](0014-daily-plan.md): An optional daily plan, kept as history
 
 New ADR: copy the shape of an existing one, take the next number, add it here.

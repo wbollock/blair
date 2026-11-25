@@ -12,6 +12,7 @@
 	import Settings from '@lucide/svelte/icons/settings';
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import ClipboardCheck from '@lucide/svelte/icons/clipboard-check';
+	import CalendarCheck from '@lucide/svelte/icons/calendar-check';
 	import Plus from '@lucide/svelte/icons/plus';
 	import { api, ok } from '#lib/api.ts';
 	import { app, isOpen } from '#lib/state.svelte.ts';
@@ -24,6 +25,7 @@
 	const nav = $derived([
 		{ href: '/inbox', label: 'Inbox', icon: Inbox, count: app.inboxCount },
 		{ href: '/today', label: 'Today', icon: Sun, count: todayCount },
+		...(app.planEnabled ? [{ href: '/plan', label: 'Plan', icon: CalendarCheck, count: app.plan.length || undefined }] : []),
 		{ href: '/upcoming', label: 'Upcoming', icon: CalendarDays },
 		{ href: '/notes', label: 'Notes', icon: StickyNote },
 		{ href: '/search', label: 'Search', icon: Search },

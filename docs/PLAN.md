@@ -133,7 +133,7 @@ Rules for every phase:
 
 - [ ] **Calendar feed**: private, revocable read-only ICS URL of tasks with due dates (scoped token in the URL).
 - [ ] **Views and analysis**: what got done per week/project, how long tasks sit open, what keeps slipping. Built on `task_completions` and `updated_at`.
-- [ ] **Daily standup**: fold the owner's standup script into Blair. Pick today's tasks each morning, record the pick, and show tasks picked day after day but never finished ("keeps slipping").
+- [x] **Daily standup** (ADR-0014, docs/daily-plan.md): fold the owner's standup script into Blair. Pick today's tasks each morning, record the pick, and show tasks picked day after day but never finished ("keeps slipping").
 
 ## Later (Phase 10+)
 

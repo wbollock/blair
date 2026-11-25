@@ -80,6 +80,8 @@ class AppState {
 	/** Bumped when the app comes back into view; views reload their tasks. */
 	refreshSeq = $state(0);
 	outbox = $state<Pending[]>([]);
+	/** Today's plan (task ids, in order) when the daily plan is turned on. */
+	plan = $state<string[]>([]);
 	private toastSeq = 0;
 	private seen = new Set<string>();
 	private notificationsPrimed = false;
@@ -94,6 +96,10 @@ class AppState {
 	get theme(): string {
 		const s = this.me?.settings as Record<string, unknown> | undefined;
 		return (s?.theme as string) || 'system';
+	}
+	/** The daily plan is optional (Settings → Features). */
+	get planEnabled(): boolean {
+		return (this.me?.settings as Record<string, unknown> | undefined)?.daily_plan === true;
 	}
 	get inboxCount(): number {
 		return Object.values(this.tasks).filter((t) => t.project_id === null && isOpen(t)).length;
@@ -119,6 +125,7 @@ class AppState {
 		if (this.me) {
 			applyTheme(this.theme);
 			this.restoreOutbox();
+			void this.loadPlan();
 		}
 		return this.status!;
 	}
@@ -145,6 +152,7 @@ class AppState {
 		this.drawer = null;
 		this.notifications = [];
 		this.unread = 0;
+		this.plan = [];
 		this.seen.clear();
 		this.notificationsPrimed = false;
 		writeStore(BOOT, null);
@@ -154,8 +162,47 @@ class AppState {
 	async refresh() {
 		if (!this.me) return;
 		this.refreshSeq++;
-		await Promise.allSettled([this.loadProjects(), this.loadLabels(), this.pollNotifications(), this.replayOutbox()]);
-	}
+		await Promise.allSettled([this.loadProjects(), this.loadLabels(), this.pollNotifications(), this.replayOutbox(), this.loadPlan()]);
+		}
+
+		// ---- daily plan (ADR-0014) ----
+
+		async loadPlan() {
+		if (!this.me || !this.planEnabled) return;
+		try {
+			const p = await ok(api.GET('/plans/{date}', { params: { path: { date: 'today' } } }));
+			for (const t of p.tasks) this.upsert(t);
+			this.plan = p.task_ids;
+		} catch {
+			/* offline; keep what we had */
+		}
+		}
+		inPlan(id: string): boolean {
+		return this.plan.includes(id);
+		}
+		async togglePlan(id: string, opts: { quiet?: boolean } = {}) {
+		const prev = this.plan;
+		const adding = !prev.includes(id);
+		this.plan = adding ? [...prev, id] : prev.filter((x) => x !== id);
+		try {
+			if (adding) this.plan = (await ok(api.POST('/plans/{date}/tasks', { params: { path: { date: 'today' } }, body: { task_ids: [id] } }))).task_ids;
+			else await ok(api.DELETE('/plans/{date}/tasks/{id}', { params: { path: { date: 'today', id } } }));
+			if (!opts.quiet) this.toast(adding ? "Added to today's plan" : "Removed from today's plan", 'info', [{ label: 'Undo', run: () => this.togglePlan(id, { quiet: true }) }]);
+		} catch (e) {
+			this.plan = prev;
+			this.toast(errMsg(e, 'Could not update the plan'), 'error');
+		}
+		}
+		async addToPlan(ids: string[]) {
+		if (!ids.length) return;
+		try {
+			const p = await ok(api.POST('/plans/{date}/tasks', { params: { path: { date: 'today' } }, body: { task_ids: ids } }));
+			for (const t of p.tasks) this.upsert(t);
+			this.plan = p.task_ids;
+		} catch (e) {
+			this.toast(errMsg(e, 'Could not update the plan'), 'error');
+		}
+		}
 
 	// ---- notifications ----
 
@@ -246,6 +293,7 @@ class AppState {
 		const settings = { ...((this.me?.settings as object) ?? {}), ...patch };
 		this.me = await ok(api.PATCH('/me', { body: { settings } }));
 		applyTheme(this.theme);
+		if ('daily_plan' in patch) await this.loadPlan();
 	}
 
 	// ---- reference data ----

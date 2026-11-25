@@ -198,6 +198,16 @@
 			</div>
 		</section>
 		<section>
+			<h2>Features</h2>
+			<label class="toggle">
+				<input type="checkbox" checked={app.planEnabled} onchange={(e) => app.saveSettings({ daily_plan: (e.currentTarget as HTMLInputElement).checked })} />
+				<span>
+					<b>Daily plan</b>
+					<span class="muted">Pick what you'll work on each day, copy it for standup, and see tasks that keep slipping. Your plans are kept when this is off, and the API works either way.</span>
+				</span>
+			</label>
+		</section>
+		<section>
 			<h2>Install the app</h2>
 			<ul class="muted install">
 				<li><b>iPhone / iPad:</b> Safari → Share → Add to Home Screen.</li>
@@ -498,5 +508,19 @@
 		color: var(--muted);
 		font-size: 13px;
 		margin: 0;
+	}
+	.toggle {
+		display: flex;
+		gap: 10px;
+		align-items: flex-start;
+		font-size: 14px;
+	}
+	.toggle > span {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+	.toggle input {
+		margin-top: 3px;
 	}
 </style>
