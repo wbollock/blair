@@ -448,6 +448,46 @@ paths:
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/AuditEvent" } }
 
+  /notifications:
+    get:
+      tags: [Account]
+      operationId: listNotifications
+      summary: In-app notifications, newest first
+      description: |
+        Reminders that fired (`kind: reminder`, with the task's current title) and security
+        events (`kind: security.*`: a sign-in from a new browser, a failed 2FA check after a
+        correct password, password or 2FA changes, new API tokens). The app polls this.
+      x-scopes: [account:read]
+      parameters:
+        - { name: unread, in: query, schema: { type: boolean }, description: Only unread notifications }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        "200":
+          description: Notifications
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, unread_count]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Notification" } }
+                  unread_count: { type: integer }
+  /notifications/read:
+    post:
+      tags: [Account]
+      operationId: readNotifications
+      summary: Mark notifications read (all of them when ids is empty)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                ids: { type: array, maxItems: 500, items: { type: string, format: uuid } }
+      responses:
+        "204": { description: Marked read }
+
   /projects:
     get:
       tags: [Projects]
@@ -1458,6 +1498,17 @@ components:
         user_agent: { type: string }
         detail: { type: object, additionalProperties: true }
         created_at: { type: string, format: date-time }
+    Notification:
+      type: object
+      required: [id, kind, task_id, task_title, text, created_at, read_at]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, example: reminder, description: "reminder or security.<audit kind>" }
+        task_id: { type: string, format: uuid, nullable: true }
+        task_title: { type: string, nullable: true, description: The task's current title (reminders) }
+        text: { type: string, description: Message for security notifications; empty for reminders }
+        created_at: { type: string, format: date-time }
+        read_at: { type: string, format: date-time, nullable: true }
     Invite:
       type: object
       required: [id, email, expires_at, used_at, created_at]
@@ -1550,7 +1601,7 @@ components:
     Task:
       type: object
       required: [id, title, description, status, priority, project_id, column_id, due_date, due_time, labels, position, completed_at, deleted_at,
-        external_source, external_id, created_at, updated_at, version, checklist_total, checklist_done, is_overdue]
+        external_source, external_id, created_at, updated_at, version, checklist_total, checklist_done, is_overdue, remind_at]
       properties:
         id: { type: string, format: uuid }
         title: { type: string, description: "Inline markdown (bold, italic, code, strike, links)" }
@@ -1561,6 +1612,7 @@ components:
         column_id: { type: string, format: uuid, nullable: true }
         due_date: { type: string, format: date, nullable: true }
         due_time: { type: string, nullable: true, example: "09:00" }
+        remind_at: { type: string, format: date-time, nullable: true, description: "When to show an in-app reminder. One per task; changing it re-arms the reminder." }
         labels: { type: array, items: { type: string, format: uuid } }
         position: { type: string }
         completed_at: { type: string, format: date-time, nullable: true }
@@ -1596,6 +1648,7 @@ components:
             column_name: { type: string, nullable: true }
             due_date: { type: string, format: date, nullable: true }
             due_time: { type: string, nullable: true }
+            remind_at: { type: string, format: date-time, nullable: true }
             labels: { type: array, items: { type: string, format: uuid } }
             label_names: { type: array, items: { type: string } }
             create_missing: { type: boolean, description: Create unknown projects/labels named in the request }
@@ -1617,6 +1670,7 @@ components:
             column_name: { type: string, nullable: true }
             due_date: { type: string, format: date, nullable: true }
             due_time: { type: string, nullable: true }
+            remind_at: { type: string, format: date-time, nullable: true, description: null removes the reminder }
             labels: { type: array, items: { type: string, format: uuid }, nullable: true }
             label_names: { type: array, items: { type: string }, nullable: true }
             create_missing: { type: boolean }

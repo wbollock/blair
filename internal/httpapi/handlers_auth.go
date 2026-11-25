@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -512,6 +513,33 @@ func (a *API) adminCreateInvite(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) adminDeleteInvite(w http.ResponseWriter, r *http.Request) {
 	if err := a.svc.DeleteInvite(r.Context(), chi.URLParam(r, "id")); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---- notifications ----
+
+func (a *API) listNotifications(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	out, err := a.svc.ListNotifications(r.Context(), userFrom(r.Context()), r.URL.Query().Get("unread") == "true", limit)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *API) readNotifications(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		IDs []string `json:"ids"`
+	}
+	if err := decode(r, &in); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := a.svc.MarkNotificationsRead(r.Context(), userFrom(r.Context()), in.IDs); err != nil {
 		writeError(w, r, err)
 		return
 	}

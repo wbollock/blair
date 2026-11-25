@@ -269,10 +269,12 @@ func serve() error {
 	return nil
 }
 
-// background runs housekeeping hourly and scheduled backups.
+// background fires reminders every 30 s, runs housekeeping hourly and takes scheduled backups.
 func background(ctx context.Context, cfg *config.Config, db *store.DB, svc *service.Service) {
+	remind := time.NewTicker(30 * time.Second)
 	house := time.NewTicker(time.Hour)
 	backup := time.NewTicker(cfg.BackupInterval)
+	defer remind.Stop()
 	defer house.Stop()
 	defer backup.Stop()
 	_ = svc.Housekeeping(ctx)
@@ -280,6 +282,12 @@ func background(ctx context.Context, cfg *config.Config, db *store.DB, svc *serv
 		select {
 		case <-ctx.Done():
 			return
+		case <-remind.C:
+			if n, err := svc.FireReminders(ctx); err != nil {
+				slog.Error("firing reminders failed", "err", err)
+			} else if n > 0 {
+				slog.Info("reminders fired", "count", n)
+			}
 		case <-house.C:
 			if err := svc.Housekeeping(ctx); err != nil {
 				slog.Error("housekeeping failed", "err", err)

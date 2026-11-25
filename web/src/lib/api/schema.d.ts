@@ -299,6 +299,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * In-app notifications, newest first
+         * @description Reminders that fired (`kind: reminder`, with the task's current title) and security
+         *     events (`kind: security.*`: a sign-in from a new browser, a failed 2FA check after a
+         *     correct password, password or 2FA changes, new API tokens). The app polls this.
+         */
+        get: operations["listNotifications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark notifications read (all of them when ids is empty) */
+        post: operations["readNotifications"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects": {
         parameters: {
             query?: never;
@@ -931,6 +970,25 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
+        Notification: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * @description reminder or security.<audit kind>
+             * @example reminder
+             */
+            kind: string;
+            /** Format: uuid */
+            task_id: string | null;
+            /** @description The task's current title (reminders) */
+            task_title: string | null;
+            /** @description Message for security notifications; empty for reminders */
+            text: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            read_at: string | null;
+        };
         Invite: {
             /** Format: uuid */
             id: string;
@@ -1058,6 +1116,11 @@ export interface components {
             due_date: string | null;
             /** @example 09:00 */
             due_time: string | null;
+            /**
+             * Format: date-time
+             * @description When to show an in-app reminder. One per task; changing it re-arms the reminder.
+             */
+            remind_at: string | null;
             labels: string[];
             position: string;
             /** Format: date-time */
@@ -1099,6 +1162,8 @@ export interface components {
             /** Format: date */
             due_date?: string | null;
             due_time?: string | null;
+            /** Format: date-time */
+            remind_at?: string | null;
             labels?: string[];
             label_names?: string[];
             /** @description Create unknown projects/labels named in the request */
@@ -1127,6 +1192,11 @@ export interface components {
             /** Format: date */
             due_date?: string | null;
             due_time?: string | null;
+            /**
+             * Format: date-time
+             * @description null removes the reminder
+             */
+            remind_at?: string | null;
             labels?: string[] | null;
             label_names?: string[] | null;
             create_missing?: boolean;
@@ -1919,6 +1989,57 @@ export interface operations {
                         data: components["schemas"]["AuditEvent"][];
                     };
                 };
+            };
+        };
+    };
+    listNotifications: {
+        parameters: {
+            query?: {
+                /** @description Only unread notifications */
+                unread?: boolean;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Notifications */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Notification"][];
+                        unread_count: number;
+                    };
+                };
+            };
+        };
+    };
+    readNotifications: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    ids?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Marked read */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

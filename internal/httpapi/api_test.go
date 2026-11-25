@@ -212,6 +212,23 @@ func TestEndToEndContract(t *testing.T) {
 	}
 	delete(b.header, "If-Match")
 
+	// Reminders and notifications.
+	rem := b.do("PATCH", "/api/v1/tasks/"+tid, map[string]any{"remind_at": "2020-01-01T09:00:00Z"})
+	expect(t, rem, 200)
+	if rem.str("remind_at") != "2020-01-01T09:00:00.000Z" {
+		t.Fatalf("remind_at = %s", rem.raw)
+	}
+	if _, err := h.svc.FireReminders(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	notes := b.do("GET", "/api/v1/notifications?unread=true", nil)
+	expect(t, notes, 200)
+	if notes.body["unread_count"].(float64) < 1 {
+		t.Fatalf("no reminder notification: %s", notes.raw)
+	}
+	expect(t, b.do("POST", "/api/v1/notifications/read", map[string]any{}), 204)
+	expect(t, b.do("PATCH", "/api/v1/tasks/"+tid, map[string]any{"remind_at": nil}), 200)
+
 	inbox := b.do("POST", "/api/v1/tasks", map[string]any{"title": "Inbox thing"})
 	expect(t, inbox, 201)
 	expect(t, b.do("POST", "/api/v1/tasks/"+inbox.str("id")+"/move", map[string]any{"project_id": pid}), 200)

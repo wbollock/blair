@@ -824,12 +824,9 @@ func (s *Service) Audit(ctx context.Context, userID, kind string, ci ClientInfo,
 	if userID != "" {
 		uid = userID
 	}
-	ua := ci.UserAgent
-	if len(ua) > 300 {
-		ua = ua[:300]
-	}
 	_, _ = s.db.W.ExecContext(ctx, `INSERT INTO audit_events (id, user_id, kind, ip, user_agent, detail, created_at) VALUES (?,?,?,?,?,?,?)`,
-		newID(), uid, kind, ci.IP, ua, string(d), s.now())
+		newID(), uid, kind, ci.IP, truncUA(ci.UserAgent), string(d), s.now())
+	s.notifySecurity(ctx, userID, kind, ci, detail)
 }
 
 func (s *Service) ListAudit(ctx context.Context, userID string, limit int) ([]AuditEvent, error) {

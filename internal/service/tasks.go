@@ -24,6 +24,7 @@ type Task struct {
 	ColumnID       *string  `json:"column_id"`
 	DueDate        *string  `json:"due_date"`
 	DueTime        *string  `json:"due_time"`
+	RemindAt       *string  `json:"remind_at"`
 	Labels         []string `json:"labels"`
 	Position       string   `json:"position"`
 	CompletedAt    *string  `json:"completed_at"`
@@ -52,6 +53,7 @@ type TaskCreate struct {
 	ColumnName     *string  `json:"column_name"`
 	DueDate        *string  `json:"due_date"`
 	DueTime        *string  `json:"due_time"`
+	RemindAt       *string  `json:"remind_at"`
 	Labels         []string `json:"labels"`
 	LabelNames     []string `json:"label_names"`
 	CreateMissing  bool     `json:"create_missing"`
@@ -74,6 +76,7 @@ type TaskPatch struct {
 	ColumnName     Opt[string]   `json:"column_name"`
 	DueDate        Opt[string]   `json:"due_date"`
 	DueTime        Opt[string]   `json:"due_time"`
+	RemindAt       Opt[string]   `json:"remind_at"`
 	Labels         Opt[[]string] `json:"labels"`
 	LabelNames     Opt[[]string] `json:"label_names"`
 	CreateMissing  bool          `json:"create_missing"`
@@ -90,7 +93,7 @@ type MoveInput struct {
 	AfterID   string      `json:"after_id"`
 }
 
-const taskSelect = `SELECT t.id, t.title, t.description, t.status, t.priority, t.project_id, t.column_id, t.due_date, t.due_time, t.position,
+const taskSelect = `SELECT t.id, t.title, t.description, t.status, t.priority, t.project_id, t.column_id, t.due_date, t.due_time, t.remind_at, t.position,
 	t.completed_at, t.deleted_at, t.external_source, t.external_id, t.created_at, t.updated_at, t.version,
 	(SELECT count(*) FROM checklist_items c WHERE c.task_id = t.id),
 	(SELECT count(*) FROM checklist_items c WHERE c.task_id = t.id AND c.done = 1)
@@ -98,8 +101,8 @@ const taskSelect = `SELECT t.id, t.title, t.description, t.status, t.priority, t
 
 func scanTask(row interface{ Scan(...any) error }) (*Task, error) {
 	var t Task
-	var pid, cid, dd, dt, ca, da, es, eid sql.NullString
-	err := row.Scan(&t.ID, &t.Title, &t.Description, &t.Status, &t.Priority, &pid, &cid, &dd, &dt, &t.Position,
+	var pid, cid, dd, dt, ra, ca, da, es, eid sql.NullString
+	err := row.Scan(&t.ID, &t.Title, &t.Description, &t.Status, &t.Priority, &pid, &cid, &dd, &dt, &ra, &t.Position,
 		&ca, &da, &es, &eid, &t.CreatedAt, &t.UpdatedAt, &t.Version, &t.ChecklistTotal, &t.ChecklistDone)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -107,7 +110,7 @@ func scanTask(row interface{ Scan(...any) error }) (*Task, error) {
 	if err != nil {
 		return nil, err
 	}
-	t.ProjectID, t.ColumnID, t.DueDate, t.DueTime = strPtr(pid), strPtr(cid), strPtr(dd), strPtr(dt)
+	t.ProjectID, t.ColumnID, t.DueDate, t.DueTime, t.RemindAt = strPtr(pid), strPtr(cid), strPtr(dd), strPtr(dt), strPtr(ra)
 	t.CompletedAt, t.DeletedAt, t.ExternalSource, t.ExternalID = strPtr(ca), strPtr(da), strPtr(es), strPtr(eid)
 	t.Labels = []string{}
 	return &t, nil
@@ -428,6 +431,13 @@ func (s *Service) createTask(ctx context.Context, q querier, u *User, in TaskCre
 	if in.DueTime != nil && (in.DueDate == nil || !validClock(*in.DueTime)) {
 		return nil, invalid("due_time", "invalid", "due_time must be HH:MM and needs a due_date")
 	}
+	if in.RemindAt != nil {
+		v, ok := validTimestamp(*in.RemindAt)
+		if !ok {
+			return nil, invalid("remind_at", "invalid", "must be an RFC 3339 timestamp")
+		}
+		in.RemindAt = &v
+	}
 
 	// Resolve project and column (SPEC §3.3).
 	var proj *Project
@@ -522,9 +532,9 @@ func (s *Service) createTask(ctx context.Context, q querier, u *User, in TaskCre
 	if err != nil {
 		return nil, err
 	}
-	_, err = q.ExecContext(ctx, `INSERT INTO tasks (id, owner_id, title, description, status, priority, project_id, column_id, due_date, due_time, position,
-		completed_at, external_source, external_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		id, u.ID, title, in.Description, status, priority, nullStr(projID), nullStr(colID), nullStr(in.DueDate), nullStr(in.DueTime),
+	_, err = q.ExecContext(ctx, `INSERT INTO tasks (id, owner_id, title, description, status, priority, project_id, column_id, due_date, due_time, remind_at, position,
+		completed_at, external_source, external_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		id, u.ID, title, in.Description, status, priority, nullStr(projID), nullStr(colID), nullStr(in.DueDate), nullStr(in.DueTime), nullStr(in.RemindAt),
 		fracindex.After(last), nullStr(completed), nullStr(in.ExternalSource), nullStr(in.ExternalID), created, now)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
@@ -606,6 +616,15 @@ func (s *Service) updateTask(ctx context.Context, q querier, u *User, id string,
 			return nil, invalid("due_time", "invalid", "due_time must be HH:MM and needs a due_date")
 		} else {
 			t.DueTime = optPtr(p.DueTime)
+		}
+	}
+	if p.RemindAt.Set {
+		if p.RemindAt.Null {
+			t.RemindAt = nil
+		} else if v, ok := validTimestamp(p.RemindAt.V); !ok {
+			return nil, invalid("remind_at", "invalid", "must be an RFC 3339 timestamp")
+		} else {
+			t.RemindAt = &v
 		}
 	}
 	if p.ExternalSource.Set {
@@ -750,9 +769,12 @@ func (s *Service) updateTask(ctx context.Context, q querier, u *User, id string,
 		}
 	}
 
+	// A new reminder time re-arms the reminder (reminded_at is cleared).
 	_, err = q.ExecContext(ctx, `UPDATE tasks SET title=?, description=?, status=?, priority=?, project_id=?, column_id=?, due_date=?, due_time=?,
+		reminded_at=CASE WHEN remind_at IS ? THEN reminded_at ELSE NULL END, remind_at=?,
 		position=?, completed_at=?, external_source=?, external_id=?, updated_at=?, version=version+1 WHERE owner_id=? AND id=?`,
 		t.Title, t.Description, t.Status, t.Priority, nullStr(t.ProjectID), nullStr(t.ColumnID), nullStr(t.DueDate), nullStr(t.DueTime),
+		nullStr(t.RemindAt), nullStr(t.RemindAt),
 		t.Position, nullStr(t.CompletedAt), nullStr(t.ExternalSource), nullStr(t.ExternalID), now, u.ID, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
