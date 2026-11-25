@@ -109,6 +109,19 @@ test('setup, 2FA, quick-add, tray, quick actions, board', async ({ page }) => {
 	await expect(board.getByRole('region', { name: 'To do' })).toContainText('Replace UPS battery');
 	if (shots) await page.screenshot({ path: `${shots}/board.png` });
 
+	// Reorder columns from the column menu, then put Done back at the end.
+	const columnNames = () => board.locator('section.col[aria-label]').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')));
+	await board.getByRole('region', { name: 'Done' }).getByRole('button', { name: 'Column actions' }).click();
+	await page.getByRole('menuitem', { name: 'Move left' }).click();
+	await expect.poll(columnNames).toEqual(['To do', 'Done', 'Doing']);
+	await board.getByRole('region', { name: 'Done' }).getByRole('button', { name: 'Column actions' }).click();
+	await page.getByRole('menuitem', { name: 'Move right' }).click();
+	await expect.poll(columnNames).toEqual(['To do', 'Doing', 'Done']);
+	// A new column's status follows its name.
+	await page.getByLabel('New column name').fill('Waiting on parts');
+	await page.getByLabel('New column name').press('Enter');
+	await expect(board.getByRole('region', { name: 'Waiting on parts' }).locator('header')).toContainText('Waiting');
+
 	// Drag a just-added card from another project straight onto a board column.
 	await qa.fill('Call plumber #blog-ideas !low');
 	await qa.press('Enter');
