@@ -11,6 +11,7 @@
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import Settings from '@lucide/svelte/icons/settings';
 	import Sparkles from '@lucide/svelte/icons/sparkles';
+	import ClipboardCheck from '@lucide/svelte/icons/clipboard-check';
 	import Plus from '@lucide/svelte/icons/plus';
 	import { api, ok } from '#lib/api.ts';
 	import { app, isOpen } from '#lib/state.svelte.ts';
@@ -25,7 +26,8 @@
 		{ href: '/today', label: 'Today', icon: Sun, count: todayCount },
 		{ href: '/upcoming', label: 'Upcoming', icon: CalendarDays },
 		{ href: '/notes', label: 'Notes', icon: StickyNote },
-		{ href: '/search', label: 'Search', icon: Search }
+		{ href: '/search', label: 'Search', icon: Search },
+		{ href: '/review', label: 'Weekly review', icon: ClipboardCheck }
 	]);
 	const projects = $derived(app.projects.filter((p) => !p.archived_at));
 	const palette = ['#2E9E6A', '#5E6AD2', '#C2410C', '#B83280', '#0E7490', '#A16207', '#7C3AED', '#BE123C'];

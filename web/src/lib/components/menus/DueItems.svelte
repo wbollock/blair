@@ -18,6 +18,12 @@
 		{o.label}<span class="kbd">{task.due_date === o.date ? '✓' : o.date.slice(5)}</span>
 	</DropdownMenu.Item>
 {/each}
+{#if task.due_date}
+	{@const later = addDays(task.due_date > app.today ? task.due_date : app.today, 7)}
+	<DropdownMenu.Item class="menu-item" onSelect={() => app.update(task.id, { due_date: later }, { undo: 'Postponed a week' })}>
+		Postpone a week<span class="kbd">{later.slice(5)}</span>
+	</DropdownMenu.Item>
+{/if}
 <DropdownMenu.Item class="menu-item" onSelect={() => (app.drawer = task.id)}>Pick a date…</DropdownMenu.Item>
 {#if task.due_date}
 	<DropdownMenu.Item class="menu-item" onSelect={() => app.update(task.id, { due_date: null }, { undo: 'Due date removed' })}>No date</DropdownMenu.Item>

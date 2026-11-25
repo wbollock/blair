@@ -129,8 +129,14 @@ Rules for every phase:
 
 **Exit:** Blair is the daily driver.
 
+## Next (owner's TODO, 2026-11-24)
+
+- [ ] **Calendar feed**: private, revocable read-only ICS URL of tasks with due dates (scoped token in the URL).
+- [ ] **Views and analysis**: what got done per week/project, how long tasks sit open, what keeps slipping. Built on `task_completions` and `updated_at`.
+- [ ] **Daily standup**: fold the owner's standup script into Blair. Pick today's tasks each morning, record the pick, and show tasks picked day after day but never finished ("keeps slipping").
+
 ## Later (Phase 10+)
 
-Recurring tasks (RRULE) · passkeys · shared projects · read-only ICS feed ·
+Passkeys · shared projects · read-only ICS feed ·
 saved filters · start/scheduled dates · areas/groups · native SwiftUI client ·
 OAuth device flow for native apps · attachments.

@@ -83,6 +83,20 @@
 		input?.focus();
 	}
 
+	/** Pasting several lines adds one task per line (list bullets and checkboxes are stripped). */
+	async function onpaste(e: ClipboardEvent) {
+		const lines = (e.clipboardData?.getData('text') ?? '')
+			.split(/\r?\n/)
+			.map((l) => l.replace(/^\s*(?:[-*+•]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)/, '').trim())
+			.filter(Boolean);
+		if (lines.length < 2) return;
+		e.preventDefault();
+		if (lines.length > 25 && !confirm(`Add ${lines.length} tasks?`)) return;
+		for (const line of lines) await app.createFromText(line);
+		app.toast(`Added ${lines.length} tasks`);
+		input?.focus();
+	}
+
 	function onkeydown(e: KeyboardEvent) {
 		if (suggestions.length) {
 			if (e.key === 'ArrowDown') {
@@ -139,6 +153,7 @@
 				bind:this={input}
 				bind:value={text}
 				{onkeydown}
+				{onpaste}
 				oninput={sync}
 				onkeyup={sync}
 				onclick={sync}

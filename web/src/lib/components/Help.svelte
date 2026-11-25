@@ -3,6 +3,7 @@
 	const keys = [
 		['q / n', 'Add a task'],
 		['Shift + Enter', 'Add and open details'],
+		['Ctrl / ⌘ + K', 'Jump to a task, project, view or action'],
 		['/', 'Search'],
 		['g then i · t · u · n', 'Go to Inbox · Today · Upcoming · Notes'],
 		['t', 'Triage the inbox'],

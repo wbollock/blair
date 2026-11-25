@@ -14,6 +14,8 @@
 	import Toasts from '#lib/components/Toasts.svelte';
 	import Help from '#lib/components/Help.svelte';
 	import Notifications from '#lib/components/Notifications.svelte';
+	import Palette, { palette } from '#lib/components/Palette.svelte';
+	import Search from '@lucide/svelte/icons/search';
 	import { focusQuickAdd } from '#lib/components/QuickAdd.svelte';
 
 	let { children }: { children: Snippet } = $props();
@@ -78,6 +80,11 @@
 		return el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || !!el.closest('[role="menu"]');
 	}
 	function onkeydown(e: KeyboardEvent) {
+		if (!isPublic && app.me && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+			e.preventDefault();
+			palette.open = !palette.open;
+			return;
+		}
 		if (isPublic || !app.me || e.metaKey || e.ctrlKey || e.altKey || typing(e)) return;
 		if (pendingG) {
 			pendingG = false;
@@ -124,6 +131,7 @@
 		<Sidebar />
 		<main>
 			<div class="top-actions">
+				<button class="menu-btn" aria-label="Jump to…" onclick={() => (palette.open = true)}><Search size={19} /></button>
 				<Notifications />
 				<button class="menu-btn" aria-label="Open menu" onclick={() => (app.sidebarOpen = true)}><Menu size={20} /></button>
 			</div>
@@ -136,6 +144,7 @@
 	<QuickActions />
 	<CaptureSheet />
 	<Help bind:open={help} />
+	<Palette />
 {/if}
 <Toasts />
 
