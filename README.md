@@ -30,8 +30,12 @@ went.
   you type.
 - **Right-click quick actions** on any task: status, column, move to project,
   due date, priority, labels, duplicate, delete. On a phone, long-press or tap `⋯`.
-- **Kanban per project.** Columns are custom but each maps to a status, so
-  moving a card to *Done* completes it.
+- **Kanban per project.** Columns are custom and reorderable, and each maps to
+  a status, so moving a card to *Done* completes it.
+- **Reminders and a notification bell.** Right-click → *Remind me*. The bell also
+  flags security events, like a sign-in from a new browser or a failed 2FA check.
+- **Works offline for capture.** Tasks added without a connection wait on the
+  device and sync when you're back.
 - Inbox triage, notes with markdown, checklists, search, Logbook, trash with undo,
   and keyboard shortcuts (press `?`).
 - Installable as a PWA on iOS, macOS Safari and Android. Light, dark or system theme.

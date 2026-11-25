@@ -480,6 +480,9 @@ hidden from the board by default (toggle), but are always in the Logbook.
 
 ## 8. Reminders and in-app notifications
 
+> As built (ADR-0012): one `remind_at` per task, polling instead of SSE, no
+> overdue notifications. The text below is the original design.
+
 - **No Web Push, no email** in v1. Notifications live inside the app, per account.
 - Sources: a reminder fires; a task becomes overdue (once, at 09:00 local on
   the day after the due date — configurable or off);
@@ -782,6 +785,9 @@ On a new version the user sees an "Update available — reload" toast (no
 surprise reloads mid-typing).
 
 ### 12.3 Offline capture queue (ADR-0008)
+
+> As built (ADR-0012): the outbox lives in localStorage, there is no read
+> cache of tasks, and the service worker has no update toast.
 
 - Creates for **tasks and notes** made while offline (or failing with a network
   error) go into an IndexedDB **outbox** with a client-generated UUIDv7. They

@@ -2,9 +2,10 @@
 
 > **Status 2026-11-24:** MVP deployed at https://blair.wboll.dev. Done: Phases 1–5
 > (except multi-select), batch API + export from Phase 8, and the Phase 7 manifest
-> and icons. Still open: the unchecked items below, which are mainly the offline
-> outbox and service worker, reminders and notifications, SSE sync, multi-select,
-> and profiling push. See ADR-0011 for what changed from this plan.
+> and icons. Since then: reminders and notifications, the offline outbox, the service
+> worker, refresh-on-focus (instead of SSE) and column reordering (ADR-0012).
+> Still open: touch drag, multi-select and profiling push. See ADR-0011 and
+> ADR-0012 for what changed from this plan.
 
 Build order for [SPEC.md](SPEC.md). Each phase ends with a **deployable,
 tested app**: a walking skeleton first, then vertical slices. Tick the boxes as
