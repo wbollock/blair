@@ -681,6 +681,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/plans/slipping": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Open tasks planned on several past days without being finished
+         * @description Days when a repeating task was completed don't count.
+         */
+        get: operations["listSlipping"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/plans/{date}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description YYYY-MM-DD, or today */
+                date: string;
+            };
+            cookie?: never;
+        };
+        /** A day's plan, in order */
+        get: operations["getPlan"];
+        /** Replace a day's plan (the order of task_ids is kept) */
+        put: operations["setPlan"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/plans/{date}/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description YYYY-MM-DD, or today */
+                date: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add tasks to a day's plan (tasks already in it are left alone) */
+        post: operations["addToPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/plans/{date}/tasks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description YYYY-MM-DD, or today */
+                date: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Take a task out of a day's plan */
+        delete: operations["removeFromPlan"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/search": {
         parameters: {
             query?: never;
@@ -969,6 +1051,21 @@ export interface components {
             };
             /** Format: date-time */
             created_at: string;
+        };
+        Plan: {
+            /** Format: date */
+            date: string;
+            task_ids: string[];
+            tasks: components["schemas"]["Task"][];
+        };
+        Slipping: {
+            task: components["schemas"]["Task"];
+            /** @description Past days it was planned and not finished */
+            planned_days: number;
+            /** Format: date */
+            first_planned: string;
+            /** Format: date */
+            last_planned: string;
         };
         Notification: {
             /** Format: uuid */
@@ -2918,6 +3015,138 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+        };
+    };
+    listSlipping: {
+        parameters: {
+            query?: {
+                min_days?: number;
+                /** @description How far back to look */
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Most-slipped first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Slipping"][];
+                    };
+                };
+            };
+        };
+    };
+    getPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description YYYY-MM-DD, or today */
+                date: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The day's plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Plan"];
+                };
+            };
+            422: components["responses"]["Validation"];
+        };
+    };
+    setPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description YYYY-MM-DD, or today */
+                date: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    task_ids: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description The day's plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Plan"];
+                };
+            };
+            422: components["responses"]["Validation"];
+        };
+    };
+    addToPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description YYYY-MM-DD, or today */
+                date: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    task_ids: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description The day's plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Plan"];
+                };
+            };
+            422: components["responses"]["Validation"];
+        };
+    };
+    removeFromPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description YYYY-MM-DD, or today */
+                date: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     search: {

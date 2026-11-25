@@ -138,6 +138,12 @@ func New(svc *service.Service, db *store.DB, cfg Config) http.Handler {
 			r.With(nwrite).Post("/notes/{id}/restore", a.restoreNote)
 			r.With(nwrite, write).Post("/notes/{id}/convert", a.convertNote)
 
+			r.With(read).Get("/plans/slipping", a.slipping)
+			r.With(read).Get("/plans/{date}", a.getPlan)
+			r.With(write).Put("/plans/{date}", a.putPlan)
+			r.With(write).Post("/plans/{date}/tasks", a.addToPlan)
+			r.With(write).Delete("/plans/{date}/tasks/{id}", a.removeFromPlan)
+
 			r.With(read).Get("/search", a.search)
 			r.With(read).Post("/quick-add/parse", a.parseQuickAdd)
 			r.With(write, bodyLimit(20<<20)).Post("/batch", a.batch)

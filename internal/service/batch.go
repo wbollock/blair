@@ -356,6 +356,20 @@ type Export struct {
 	Labels   []Label      `json:"labels"`
 	Tasks    []ExportTask `json:"tasks"`
 	Notes    []Note       `json:"notes"`
+	// Plans and Completions are history for the daily plan and repeating tasks.
+	Plans       []ExportPlanItem   `json:"plans"`
+	Completions []ExportCompletion `json:"completions"`
+}
+
+type ExportPlanItem struct {
+	Date   string `json:"date"`
+	TaskID string `json:"task_id"`
+}
+
+type ExportCompletion struct {
+	TaskID      string  `json:"task_id"`
+	DueDate     *string `json:"due_date"`
+	CompletedAt string  `json:"completed_at"`
 }
 
 func (s *Service) allTasks(ctx context.Context, u *User) ([]*Task, error) {
@@ -421,6 +435,9 @@ func (s *Service) Export(ctx context.Context, u *User) (*Export, error) {
 		return nil, err
 	}
 	e.Notes = append(active, trashed...)
+	if err := s.exportHistory(ctx, u, e); err != nil {
+		return nil, err
+	}
 	return e, nil
 }
 
@@ -472,4 +489,36 @@ func csvSafe(v string) string {
 		return "'" + v
 	}
 	return v
+}
+
+func (s *Service) exportHistory(ctx context.Context, u *User, e *Export) error {
+	e.Plans, e.Completions = []ExportPlanItem{}, []ExportCompletion{}
+	rows, err := s.db.R.QueryContext(ctx, `SELECT plan_date, task_id FROM plan_items WHERE owner_id = ? ORDER BY plan_date, position`, u.ID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var p ExportPlanItem
+		if err := rows.Scan(&p.Date, &p.TaskID); err != nil {
+			rows.Close()
+			return err
+		}
+		e.Plans = append(e.Plans, p)
+	}
+	rows.Close()
+	rows, err = s.db.R.QueryContext(ctx, `SELECT task_id, due_date, completed_at FROM task_completions WHERE owner_id = ? ORDER BY completed_at`, u.ID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c ExportCompletion
+		var due sql.NullString
+		if err := rows.Scan(&c.TaskID, &due, &c.CompletedAt); err != nil {
+			return err
+		}
+		c.DueDate = strPtr(due)
+		e.Completions = append(e.Completions, c)
+	}
+	return rows.Err()
 }

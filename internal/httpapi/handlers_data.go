@@ -518,3 +518,93 @@ func (a *API) export(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, http.StatusBadRequest, "bad_request", "Unknown format", "format must be json or csv")
 	}
 }
+
+// ---- daily plans ----
+
+func (a *API) planDate(w http.ResponseWriter, r *http.Request) (string, bool) {
+	date, err := a.svc.PlanDate(userFrom(r.Context()), chi.URLParam(r, "date"))
+	if err != nil {
+		writeError(w, r, err)
+		return "", false
+	}
+	return date, true
+}
+
+func (a *API) getPlan(w http.ResponseWriter, r *http.Request) {
+	date, ok := a.planDate(w, r)
+	if !ok {
+		return
+	}
+	p, err := a.svc.GetPlan(r.Context(), userFrom(r.Context()), date)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+func (a *API) putPlan(w http.ResponseWriter, r *http.Request) {
+	date, ok := a.planDate(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		TaskIDs []string `json:"task_ids"`
+	}
+	if err := decode(r, &in); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	p, err := a.svc.SetPlan(r.Context(), userFrom(r.Context()), date, in.TaskIDs)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+func (a *API) addToPlan(w http.ResponseWriter, r *http.Request) {
+	date, ok := a.planDate(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		TaskIDs []string `json:"task_ids"`
+	}
+	if err := decode(r, &in); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	p, err := a.svc.AddToPlan(r.Context(), userFrom(r.Context()), date, in.TaskIDs)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+func (a *API) removeFromPlan(w http.ResponseWriter, r *http.Request) {
+	date, ok := a.planDate(w, r)
+	if !ok {
+		return
+	}
+	if err := a.svc.RemoveFromPlan(r.Context(), userFrom(r.Context()), date, chi.URLParam(r, "id")); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) slipping(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	minDays, err := strconv.Atoi(q.Get("min_days"))
+	if err != nil || minDays < 1 {
+		minDays = 3
+	}
+	days, err := strconv.Atoi(q.Get("days"))
+	if err != nil || days < 1 || days > 365 {
+		days = 30
+	}
+	out, err := a.svc.SlippingTasks(r.Context(), userFrom(r.Context()), minDays, days)
+	list(w, r, out, err)
+}

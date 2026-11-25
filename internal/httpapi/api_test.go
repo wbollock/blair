@@ -229,6 +229,15 @@ func TestEndToEndContract(t *testing.T) {
 	expect(t, b.do("POST", "/api/v1/me/notifications/read", map[string]any{}), 204)
 	expect(t, b.do("PATCH", "/api/v1/tasks/"+tid, map[string]any{"remind_at": nil}), 200)
 
+	// Daily plan.
+	plan := b.do("POST", "/api/v1/plans/today/tasks", map[string]any{"task_ids": []string{tid}})
+	expect(t, plan, 200)
+	expect(t, b.do("GET", "/api/v1/plans/today", nil), 200)
+	expect(t, b.do("PUT", "/api/v1/plans/"+plan.str("date"), map[string]any{"task_ids": []string{tid}}), 200)
+	expect(t, b.do("GET", "/api/v1/plans/slipping?min_days=1", nil), 200)
+	expect(t, b.do("GET", "/api/v1/plans/not-a-date", nil), 422)
+	expect(t, b.do("DELETE", "/api/v1/plans/today/tasks/"+tid, nil), 204)
+
 	inbox := b.do("POST", "/api/v1/tasks", map[string]any{"title": "Inbox thing"})
 	expect(t, inbox, 201)
 	expect(t, b.do("POST", "/api/v1/tasks/"+inbox.str("id")+"/move", map[string]any{"project_id": pid}), 200)

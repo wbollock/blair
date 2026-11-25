@@ -84,6 +84,12 @@ tags:
   - name: Tasks
   - name: Labels
   - name: Notes
+  - name: Plans
+    description: |
+      Optional daily plan: the tasks you picked to work on each day, separate from due dates.
+      Days are kept, so `GET /plans/slipping` can show tasks you keep planning but don't finish.
+      Use `today` for the date to mean today in your account's timezone. Scripts can record a
+      standup this way: `POST /plans/today/tasks {"task_ids": [...]}`.
   - name: Bulk
     description: Batch writes and export for migrations and backups.
   - name: Admin
@@ -1064,6 +1070,99 @@ paths:
               schema: { $ref: "#/components/schemas/Task" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /plans/slipping:
+    get:
+      tags: [Plans]
+      operationId: listSlipping
+      summary: Open tasks planned on several past days without being finished
+      description: Days when a repeating task was completed don't count.
+      x-scopes: [tasks:read]
+      parameters:
+        - { name: min_days, in: query, schema: { type: integer, minimum: 1, default: 3 } }
+        - { name: days, in: query, schema: { type: integer, minimum: 1, maximum: 365, default: 30 }, description: How far back to look }
+      responses:
+        "200":
+          description: Most-slipped first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Slipping" } }
+  /plans/{date}:
+    parameters:
+      - { name: date, in: path, required: true, schema: { type: string, example: today }, description: "YYYY-MM-DD, or today" }
+    get:
+      tags: [Plans]
+      operationId: getPlan
+      summary: A day's plan, in order
+      x-scopes: [tasks:read]
+      responses:
+        "200":
+          description: The day's plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Plan" }
+        "422": { $ref: "#/components/responses/Validation" }
+    put:
+      tags: [Plans]
+      operationId: setPlan
+      summary: Replace a day's plan (the order of task_ids is kept)
+      x-scopes: [tasks:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [task_ids]
+              properties:
+                task_ids: { type: array, maxItems: 200, items: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The day's plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Plan" }
+        "422": { $ref: "#/components/responses/Validation" }
+  /plans/{date}/tasks:
+    parameters:
+      - { name: date, in: path, required: true, schema: { type: string, example: today }, description: "YYYY-MM-DD, or today" }
+    post:
+      tags: [Plans]
+      operationId: addToPlan
+      summary: Add tasks to a day's plan (tasks already in it are left alone)
+      x-scopes: [tasks:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [task_ids]
+              properties:
+                task_ids: { type: array, maxItems: 200, items: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The day's plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Plan" }
+        "422": { $ref: "#/components/responses/Validation" }
+  /plans/{date}/tasks/{id}:
+    parameters:
+      - { name: date, in: path, required: true, schema: { type: string, example: today }, description: "YYYY-MM-DD, or today" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      tags: [Plans]
+      operationId: removeFromPlan
+      summary: Take a task out of a day's plan
+      x-scopes: [tasks:write]
+      responses:
+        "204": { description: Removed }
   /search:
     get:
       tags: [Tasks]
@@ -1498,6 +1597,21 @@ components:
         user_agent: { type: string }
         detail: { type: object, additionalProperties: true }
         created_at: { type: string, format: date-time }
+    Plan:
+      type: object
+      required: [date, task_ids, tasks]
+      properties:
+        date: { type: string, format: date }
+        task_ids: { type: array, items: { type: string, format: uuid } }
+        tasks: { type: array, items: { $ref: "#/components/schemas/Task" } }
+    Slipping:
+      type: object
+      required: [task, planned_days, first_planned, last_planned]
+      properties:
+        task: { $ref: "#/components/schemas/Task" }
+        planned_days: { type: integer, description: Past days it was planned and not finished }
+        first_planned: { type: string, format: date }
+        last_planned: { type: string, format: date }
     Notification:
       type: object
       required: [id, kind, task_id, task_title, text, created_at, read_at]
