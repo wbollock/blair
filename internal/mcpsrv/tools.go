@@ -137,75 +137,75 @@ func (s *server) addTools(m *mcp.Server) {
 		Name:        "list_tasks",
 		Title:       "List tasks",
 		Description: "List tasks, newest information first by due date. By default only open tasks (todo, doing, waiting). Filter by project, label, status or due date.",
-	}, "tasks:read", false, s.listTasks)
+	}, "tasks:read", false, false, s.listTasks)
 
 	register(s, m, &mcp.Tool{
 		Name:        "search",
 		Title:       "Search tasks",
 		Description: "Full-text search over task titles and descriptions, including finished tasks.",
-	}, "tasks:read", false, s.search)
+	}, "tasks:read", false, false, s.search)
 
 	register(s, m, &mcp.Tool{
 		Name:        "get_task",
 		Title:       "Get a task",
 		Description: "Get one task with its full description and checklist. The version it returns is needed to update the task.",
-	}, "tasks:read", false, s.getTask)
+	}, "tasks:read", false, false, s.getTask)
 
 	register(s, m, &mcp.Tool{
 		Name:        "today",
 		Title:       "Today",
 		Description: "What is on for today (in the user's time zone): tasks picked for today's plan, tasks due today, and how many are overdue.",
-	}, "tasks:read", false, s.today)
+	}, "tasks:read", false, false, s.today)
 
 	register(s, m, &mcp.Tool{
 		Name:        "overdue",
 		Title:       "Overdue tasks",
 		Description: "Open tasks whose due date has passed, oldest first.",
-	}, "tasks:read", false, s.overdue)
+	}, "tasks:read", false, false, s.overdue)
 
 	register(s, m, &mcp.Tool{
 		Name:        "slipping",
 		Title:       "Slipping tasks",
 		Description: "Open tasks that were planned for several past days without being finished.",
-	}, "tasks:read", false, s.slipping)
+	}, "tasks:read", false, false, s.slipping)
 
 	register(s, m, &mcp.Tool{
 		Name:        "list_projects",
 		Title:       "List projects",
 		Description: "List projects with their columns (each column maps to a status) and open task counts. Use these names in create_task, update_task and move_task.",
-	}, "tasks:read", false, s.listProjects)
+	}, "tasks:read", false, false, s.listProjects)
 
 	// ---- writes (tasks:write); none of them deletes anything ----
 	register(s, m, &mcp.Tool{
 		Name:        "create_task",
 		Title:       "Create a task",
 		Description: "Create a task. Project, column and labels are given by name and must already exist (see list_projects). Without a project the task goes to the Inbox.",
-	}, "tasks:write", true, s.createTask)
+	}, "tasks:write", true, true, s.createTask)
 
 	register(s, m, &mcp.Tool{
 		Name:  "update_task",
 		Title: "Update a task",
 		Description: "Change fields of a task. Pass the version from get_task or the last result; if the task changed in between you get a version mismatch " +
 			"and must read it again. Only the fields you send change; list a field in clear to remove its value.",
-	}, "tasks:write", true, s.updateTask)
+	}, "tasks:write", true, false, s.updateTask)
 
 	register(s, m, &mcp.Tool{
 		Name:        "complete_task",
 		Title:       "Complete a task",
 		Description: "Mark a task done. A repeating task rolls forward to its next date instead.",
-	}, "tasks:write", true, s.completeTask)
+	}, "tasks:write", true, false, s.completeTask)
 
 	register(s, m, &mcp.Tool{
 		Name:        "move_task",
 		Title:       "Move a task",
 		Description: "Move a task to another project and/or column, optionally placing it before or after another task. Moving into a column sets the task's status to match.",
-	}, "tasks:write", true, s.moveTask)
+	}, "tasks:write", true, false, s.moveTask)
 
 	register(s, m, &mcp.Tool{
 		Name:        "plan_today",
 		Title:       "Plan today",
 		Description: "Add tasks to today's plan and return the plan. This only adds; it never removes tasks from the plan.",
-	}, "tasks:write", true, s.planToday)
+	}, "tasks:write", true, true, s.planToday)
 }
 
 // ---- reads ----
@@ -339,11 +339,19 @@ func (s *server) today(ctx context.Context, u *service.User, _ noIn) (todayOut, 
 	if err != nil {
 		return todayOut{}, "", err
 	}
-	over, err := s.svc.ListTasks(ctx, u, service.TaskFilter{Overdue: true, Limit: 1000})
-	if err != nil {
-		return todayOut{}, "", err
+	overdue := 0
+	for cursor, pages := "", 0; ; pages++ {
+		over, err := s.svc.ListTasks(ctx, u, service.TaskFilter{Overdue: true, Limit: 1000, Cursor: cursor})
+		if err != nil {
+			return todayOut{}, "", err
+		}
+		overdue += len(over.Data)
+		if over.NextCursor == nil || pages >= 50 {
+			break
+		}
+		cursor = *over.NextCursor
 	}
-	return todayOut{Date: date, Planned: r.tasks(plan.Tasks), DueToday: r.tasks(due.Data), OverdueCount: len(over.Data)}, "", nil
+	return todayOut{Date: date, Planned: r.tasks(plan.Tasks), DueToday: r.tasks(due.Data), OverdueCount: overdue}, "", nil
 }
 
 type limitIn struct {
@@ -465,7 +473,7 @@ func (s *server) createTask(ctx context.Context, u *service.User, in createTaskI
 		return TaskOut{}, "", err
 	}
 	c := service.TaskCreate{Title: in.Title, Description: in.Description, Priority: in.Priority,
-		DueDate: nonEmpty(in.DueDate), DueTime: nonEmpty(in.DueTime), LabelNames: in.Labels, ColumnName: nonEmpty(in.Column)}
+		DueDate: nonEmpty(in.DueDate), DueTime: nonEmpty(in.DueTime), ColumnName: nonEmpty(in.Column)}
 	if in.Project != "" {
 		p, err := r.project(in.Project)
 		if err != nil {
@@ -474,9 +482,11 @@ func (s *server) createTask(ctx context.Context, u *service.User, in createTaskI
 		c.ProjectID = &p.ID
 	}
 	for _, l := range in.Labels {
-		if _, err := r.label(l); err != nil {
+		id, err := r.label(l) // the id is what gets stored: the database's own name match is ASCII-only
+		if err != nil {
 			return TaskOut{}, "", err
 		}
+		c.Labels = append(c.Labels, id)
 	}
 	res, err := s.svc.CreateTask(ctx, u, c)
 	if err != nil {
@@ -541,12 +551,15 @@ func (s *server) updateTask(ctx context.Context, u *service.User, in updateTaskI
 		p.ColumnName = service.Some(*in.Column)
 	}
 	if in.Labels != nil {
+		ids := []string{}
 		for _, l := range *in.Labels {
-			if _, err := r.label(l); err != nil {
+			id, err := r.label(l)
+			if err != nil {
 				return TaskOut{}, "", err
 			}
+			ids = append(ids, id)
 		}
-		p.LabelNames = service.Some(*in.Labels)
+		p.Labels = service.Some(ids)
 	}
 	for _, f := range in.Clear {
 		switch f {

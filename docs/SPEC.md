@@ -583,7 +583,7 @@ custom connector at `https://<host>/mcp`.
   RFC 8414 at `/.well-known/oauth-authorization-server`.
 - **Registration**: RFC 7591 at `POST /oauth/register`, public clients only. Refused
   unless the owner opened a 10-minute window (`POST /me/connected-apps/registration`,
-  3 uses, 2FA required); the client then belongs to that account. Only these redirect URIs
+  one use, 2FA required); the client then belongs to that account. Only these redirect URIs
   are accepted, matched exactly:
   `https://claude.ai/api/mcp/auth_callback` and
   `https://claude.com/api/mcp/auth_callback`. 10 registrations per hour per

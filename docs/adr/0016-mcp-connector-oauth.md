@@ -16,10 +16,13 @@ it a way to destroy data or to reach the rest of the API.
   redirect URI match, RFC 8414 / 9728 metadata, RFC 7591 registration, RFC 7009
   revocation, RFC 9207 `iss` in the redirect, RFC 8707 `resource`.
 - **Registration is closed unless the owner opens it.** Settings → Connected apps opens a
-  10-minute window (3 uses, 2FA required). A client registered in it belongs to that account,
+  10-minute window (one use, 2FA required). A client registered in it belongs to that account,
   and only that account can approve it. This stops a stranger registering an app and sending
   the owner its authorize link. Only the two Claude callback URLs are accepted, so a code can
-  never reach another site. The name is untrusted text, shown escaped and labelled unverified.
+  never reach another site. If two accounts have a window open at once a registration is
+  refused (it cannot say whose it is). A client that was never approved goes stale after about
+  ten minutes, so a link built from a stranger's registration does not stay usable; a client
+  that has been approved before (a reconnect) stays usable. The name is untrusted text, shown escaped and labelled unverified.
 - **Short-lived, rotating, bound tokens.** Codes 60 s. Access tokens 1 h.
   Refresh tokens 30 d, rotated on every use. Reuse of a rotated refresh token,
   or of a code, revokes the whole grant. Tokens are opaque, stored as SHA-256

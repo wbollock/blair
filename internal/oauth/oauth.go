@@ -50,7 +50,7 @@ const (
 	prefixCode    = "blair_oac_"
 	maxGrants     = 10 // live connections per account; the oldest is revoked past this
 	windowTTL     = 10 * time.Minute
-	windowUses    = 3
+	windowUses    = 1
 )
 
 // Config is what the server needs from the app config.
@@ -72,6 +72,7 @@ type Server struct {
 	db   *store.DB
 	svc  *service.Service
 	base string
+	csp  string
 
 	regIP, loginIP, loginAcct, mfaIP, mfaAcct, tokenIP, revokeIP *ratelimit.Limiter
 }
@@ -98,6 +99,7 @@ func New(db *store.DB, svc *service.Service, cfg Config) *Server {
 	return &Server{
 		cfg: cfg, db: db, svc: svc,
 		base:      strings.TrimRight(cfg.BaseURL.String(), "/"),
+		csp:       pageCSP(cfg.RedirectURIs),
 		regIP:     ratelimit.New(time.Hour, 10),
 		loginIP:   ratelimit.New(time.Minute, 5),
 		loginAcct: ratelimit.New(time.Hour, 10),
@@ -262,6 +264,7 @@ func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
 type client struct {
 	ID           string
 	OwnerID      string
+	CreatedAt    string
 	Name         string
 	RedirectURIs []string
 }
@@ -269,7 +272,7 @@ type client struct {
 func (s *Server) client(ctx context.Context, id string) (*client, error) {
 	var c client
 	var uris string
-	err := s.db.R.QueryRowContext(ctx, `SELECT id, owner_id, name, redirect_uris FROM oauth_clients WHERE id = ?`, id).Scan(&c.ID, &c.OwnerID, &c.Name, &uris)
+	err := s.db.R.QueryRowContext(ctx, `SELECT id, owner_id, name, redirect_uris, created_at FROM oauth_clients WHERE id = ?`, id).Scan(&c.ID, &c.OwnerID, &c.Name, &uris, &c.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrNotFound
 	}
@@ -288,13 +291,20 @@ func (s *Server) revokeGrant(ctx context.Context, grantID, reason string) error 
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `UPDATE oauth_grants SET revoked_at = ?, revoked_reason = ? WHERE id = ? AND revoked_at IS NULL`, s.nowStr(), reason, grantID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM oauth_tokens WHERE grant_id = ? AND kind = 'access'`, grantID); err != nil {
+	if err := s.revokeGrantIn(ctx, tx, grantID, reason); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// revokeGrantIn does the work inside a transaction the caller already holds. The writer pool has
+// one connection, so a caller inside a transaction must not call revokeGrant.
+func (s *Server) revokeGrantIn(ctx context.Context, q execer, grantID, reason string) error {
+	if _, err := q.ExecContext(ctx, `UPDATE oauth_grants SET revoked_at = ?, revoked_reason = ? WHERE id = ? AND revoked_at IS NULL`, s.nowStr(), reason, grantID); err != nil {
+		return err
+	}
+	_, err := q.ExecContext(ctx, `DELETE FROM oauth_tokens WHERE grant_id = ? AND kind = 'access'`, grantID)
+	return err
 }
 
 func newID() string { return uuid.Must(uuid.NewV7()).String() }
@@ -308,13 +318,36 @@ func (s *Server) OpenRegistration(ctx context.Context, userID string) (time.Time
 	return exp, err
 }
 
-// takeWindow consumes one registration from an open window and returns whose it was.
+// takeWindow consumes the one registration of the one open window and returns whose it was.
+// If two accounts have a window open at once it refuses: an unauthenticated registration cannot
+// say which of them it belongs to, and guessing would hand one account's client to the other.
 func (s *Server) takeWindow(ctx context.Context) (string, bool) {
-	var uid string
-	err := s.db.W.QueryRowContext(ctx, `UPDATE oauth_windows SET remaining = remaining - 1
-		WHERE user_id = (SELECT user_id FROM oauth_windows WHERE remaining > 0 AND expires_at > ? ORDER BY expires_at LIMIT 1)
-		RETURNING user_id`, s.nowStr()).Scan(&uid)
-	return uid, err == nil
+	tx, err := s.db.W.BeginTx(ctx, nil)
+	if err != nil {
+		return "", false
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryContext(ctx, `SELECT user_id FROM oauth_windows WHERE remaining > 0 AND expires_at > ?`, s.nowStr())
+	if err != nil {
+		return "", false
+	}
+	var open []string
+	for rows.Next() {
+		var u string
+		if rows.Scan(&u) == nil {
+			open = append(open, u)
+		}
+	}
+	rows.Close()
+	if len(open) != 1 {
+		return "", false
+	}
+	if res, err := tx.ExecContext(ctx, `UPDATE oauth_windows SET remaining = remaining - 1 WHERE user_id = ? AND remaining > 0`, open[0]); err != nil {
+		return "", false
+	} else if n, _ := res.RowsAffected(); n != 1 {
+		return "", false
+	}
+	return open[0], tx.Commit() == nil
 }
 
 // trimGrants keeps an account to maxGrants live connections by revoking the oldest.
@@ -334,4 +367,17 @@ func (s *Server) trimGrants(ctx context.Context, userID string) {
 	for _, id := range ids {
 		_ = s.revokeGrant(ctx, id, "too_many_connections")
 	}
+}
+
+// clientFresh reports whether a client may start an authorization. A client that has never been
+// approved is only good for a few minutes after it registered, so a link built from a stranger's
+// registration (made inside your window) goes stale before it can be used on you. A client that
+// has had a grant (a reconnect) stays usable.
+func (s *Server) clientFresh(ctx context.Context, c *client) bool {
+	if c.CreatedAt >= store.FormatTime(s.now().Add(-(windowTTL + time.Minute))) {
+		return true
+	}
+	var n int
+	err := s.db.R.QueryRowContext(ctx, `SELECT count(*) FROM oauth_grants WHERE client_id = ?`, c.ID).Scan(&n)
+	return err == nil && n > 0
 }

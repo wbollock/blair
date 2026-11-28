@@ -32,12 +32,21 @@ button.primary{background:var(--accent);color:var(--accent-fg);border-color:var(
 .err{color:var(--bad);font-weight:600}ul{padding-left:1.1rem;margin:8px 0}li{margin:6px 0}code{font-size:.85rem;word-break:break-all}
 `
 
-var pageCSP = func() string {
+// pageCSP builds the sign-in page policy. Chrome applies form-action to the redirect that follows
+// the consent POST, so every callback origin this server accepts must be listed.
+func pageCSP(redirects []string) string {
 	sum := sha256.Sum256([]byte(pageStyle))
-	// Chrome applies form-action to the redirect after a form POST, so the callbacks are listed.
+	seen := map[string]bool{"'self'": true}
+	targets := []string{"'self'"}
+	for _, ru := range redirects {
+		if u, err := url.Parse(ru); err == nil && u.Host != "" && !seen[u.Scheme+"://"+u.Host] {
+			seen[u.Scheme+"://"+u.Host] = true
+			targets = append(targets, u.Scheme+"://"+u.Host)
+		}
+	}
 	return "default-src 'none'; style-src 'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) +
-		"'; form-action 'self' https://claude.ai https://claude.com; frame-ancestors 'none'; base-uri 'none'"
-}()
+		"'; form-action " + strings.Join(targets, " ") + "; frame-ancestors 'none'; base-uri 'none'"
+}
 
 var pageTmpl = template.Must(template.New("page").Parse(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -85,7 +94,7 @@ func (s *Server) page(w http.ResponseWriter, status int, d pageData) {
 	h := w.Header()
 	h.Set("Content-Type", "text/html; charset=utf-8")
 	h.Set("Cache-Control", "no-store")
-	h.Set("Content-Security-Policy", pageCSP)
+	h.Set("Content-Security-Policy", s.csp)
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("X-Frame-Options", "DENY")
@@ -156,6 +165,10 @@ func (s *Server) authorizeGet(w http.ResponseWriter, r *http.Request) {
 	c, err := s.client(ctx, q.Get("client_id"))
 	if err != nil {
 		s.errorPage(w, http.StatusBadRequest, "Unknown app", "This app is not registered. Remove the connector and add it again.")
+		return
+	}
+	if !s.clientFresh(ctx, c) {
+		s.errorPage(w, http.StatusBadRequest, "This app's registration expired", "Open registration in Blair under Settings, Connected apps, then add the app again.")
 		return
 	}
 	redirect := q.Get("redirect_uri")
@@ -379,7 +392,13 @@ func (s *Server) stepMFA(w http.ResponseWriter, r *http.Request, f *flow, c *cli
 func (s *Server) stepConsent(w http.ResponseWriter, r *http.Request, f *flow, c *client, approve bool) {
 	ctx := r.Context()
 	uid := f.UserID.String
-	_, _ = s.db.W.ExecContext(ctx, `DELETE FROM oauth_requests WHERE id = ?`, f.ID)
+	// Consume the flow first. Two submissions of the same consent form race here, and only the
+	// one whose DELETE removes the row may go on.
+	res, err := s.db.W.ExecContext(ctx, `DELETE FROM oauth_requests WHERE id = ?`, f.ID)
+	if n, _ := res.RowsAffected(); err != nil || n != 1 {
+		s.errorPage(w, http.StatusBadRequest, "This sign-in was already used", "Start again from the app.")
+		return
+	}
 	http.SetCookie(w, &http.Cookie{Name: s.cookieName(), Path: "/", MaxAge: -1, HttpOnly: true, Secure: s.cfg.Secure, SameSite: http.SameSiteLaxMode})
 	if !approve {
 		s.audit(r, uid, "oauth.authorize_denied", map[string]any{"client_id": c.ID})

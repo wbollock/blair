@@ -291,7 +291,7 @@ func (e *env) openWindow() {
 	}
 }
 
-// Nobody can register a client unless the owner opened the window, and a window holds three uses
+// Nobody can register a client unless the owner opened the window, and a window holds one use
 // and lasts ten minutes. Otherwise a stranger could create an app for the owner to approve.
 func TestRegistrationNeedsAnOpenWindow(t *testing.T) {
 	e := newEnv(t)
@@ -300,13 +300,11 @@ func TestRegistrationNeedsAnOpenWindow(t *testing.T) {
 		t.Fatalf("no window: %d %v", st, out)
 	}
 	e.openWindow()
-	for i := range 3 {
-		if st, _ := e.postJSON("/oauth/register", body); st != 201 {
-			t.Fatalf("use %d: %d", i, st)
-		}
+	if st, _ := e.postJSON("/oauth/register", body); st != 201 {
+		t.Fatalf("the one use: %d", st)
 	}
 	if st, _ := e.postJSON("/oauth/register", body); st != 403 {
-		t.Fatalf("4th use: %d, want 403", st)
+		t.Fatalf("2nd use: %d, want 403", st)
 	}
 	e.openWindow()
 	e.now = e.now.Add(11 * time.Minute)
@@ -856,5 +854,137 @@ func TestHousekeeping(t *testing.T) {
 		if err := e.db.R.QueryRow(`SELECT count(*) FROM ` + tbl).Scan(&n); err != nil || n != 0 {
 			t.Errorf("%s: %d rows left (%v)", tbl, n, err)
 		}
+	}
+}
+
+// Two accounts with an open window: a registration cannot say whose it is, so it is refused.
+func TestAmbiguousRegistrationWindowsAreRefused(t *testing.T) {
+	e := newEnv(t)
+	other, err := e.svc.CreateUser(context.Background(), service.NewUser{Email: "other@example.com", Password: "plum-orbit-kettle-92", Timezone: "UTC"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.openWindow()
+	if _, err := e.o.OpenRegistration(context.Background(), other.ID); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := e.postJSON("/oauth/register", map[string]any{"redirect_uris": []string{callback}}); st != 403 {
+		t.Fatalf("ambiguous windows: %d, want 403", st)
+	}
+}
+
+// A client that was never approved goes stale, so a link built from a stranger's registration
+// does not stay usable; a client that has been approved before (a reconnect) does.
+func TestUnapprovedClientsGoStale(t *testing.T) {
+	e := newEnv(t)
+	stale := e.register(callback)
+	used := e.register(callback)
+	e.exchange(used, e.connect(used, nil), verifier)
+	e.now = e.now.Add(30 * time.Minute)
+	if res, _ := e.browser().Get(e.authorizeURL(stale, nil)); res.StatusCode != 400 || res.Header.Get("Location") != "" {
+		t.Fatalf("stale client: %d", res.StatusCode)
+	}
+	if res, _ := e.browser().Get(e.authorizeURL(used, nil)); res.StatusCode != 200 {
+		t.Fatalf("a client with a grant must stay usable: %d", res.StatusCode)
+	}
+}
+
+// Submitting the consent form twice at once must not produce two codes.
+func TestConsentCanOnlyBeUsedOnce(t *testing.T) {
+	e := newEnv(t)
+	cid := e.register(callback)
+	c := e.browser()
+	f, _ := e.toMFA(c, cid)
+	f.Set("action", "mfa")
+	f.Set("code", e.code())
+	f = fields(t, read(post(t, c, e, f)))
+	f.Set("action", "approve")
+	codes := make(chan string, 4)
+	for range 4 {
+		go func() {
+			res := post(t, c, e, f)
+			loc, _ := url.Parse(res.Header.Get("Location"))
+			res.Body.Close()
+			codes <- loc.Query().Get("code")
+		}()
+	}
+	got := 0
+	for range 4 {
+		if <-codes != "" {
+			got++
+		}
+	}
+	if got != 1 {
+		t.Fatalf("%d codes from one consent, want 1", got)
+	}
+}
+
+// Replaying a code from two requests at once must still end with the issued tokens revoked.
+func TestConcurrentCodeExchangeLeavesNothingValid(t *testing.T) {
+	e := newEnv(t)
+	cid := e.register(callback)
+	code := e.connect(cid, nil)
+	type out struct {
+		st  int
+		tok map[string]any
+	}
+	ch := make(chan out, 2)
+	for range 2 {
+		go func() {
+			st, tok := e.exchange(cid, code, verifier)
+			ch <- out{st, tok}
+		}()
+	}
+	a, b := <-ch, <-ch
+	if (a.st == 200) == (b.st == 200) {
+		t.Fatalf("statuses %d and %d: exactly one exchange may win", a.st, b.st)
+	}
+	win := a
+	if b.st == 200 {
+		win = b
+	}
+	if _, err := e.o.VerifyAccessToken(context.Background(), win.tok["access_token"].(string)); err == nil {
+		t.Fatal("the winner's tokens survived a replay")
+	}
+}
+
+// A password change or 2FA reset must also cancel a sign-in in progress and any unexchanged code.
+func TestCredentialChangeCancelsPendingFlowsAndCodes(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	cid := e.register(callback)
+
+	// A flow that has reached the consent screen.
+	c := e.browser()
+	f, _ := e.toMFA(c, cid)
+	f.Set("action", "mfa")
+	f.Set("code", e.code())
+	consent := fields(t, read(post(t, c, e, f)))
+	// A code that was issued but not exchanged yet.
+	cid2 := e.register(callback)
+	code := e.connect(cid2, nil)
+
+	u, _ := e.svc.GetUser(ctx, e.user.ID)
+	if err := e.svc.ChangePassword(ctx, u, testPW, "plum-orbit-kettle-95", ""); err != nil {
+		t.Fatal(err)
+	}
+	consent.Set("action", "approve")
+	if res := post(t, c, e, consent); res.StatusCode == 302 {
+		t.Fatal("a pending consent still produced a code after the password changed")
+	}
+	if st, _, _ := e.form("/oauth/token", url.Values{"grant_type": {"authorization_code"}, "client_id": {cid2}, "code": {code}, "redirect_uri": {callback}, "code_verifier": {verifier}}); st != 400 {
+		t.Fatal("an unexchanged code survived the password change")
+	}
+}
+
+func TestCSPNamesEveryAcceptedCallbackOrigin(t *testing.T) {
+	csp := pageCSP([]string{"https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback", "http://localhost:6274/oauth/callback", "https://claude.ai/other"})
+	for _, want := range []string{"form-action 'self' https://claude.ai https://claude.com http://localhost:6274;", "default-src 'none'", "frame-ancestors 'none'"} {
+		if !strings.Contains(csp, want) {
+			t.Errorf("CSP missing %q: %s", want, csp)
+		}
+	}
+	if strings.Count(csp, "https://claude.ai") != 1 {
+		t.Error("origin listed twice")
 	}
 }

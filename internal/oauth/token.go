@@ -89,10 +89,17 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 func (s *Server) exchangeCode(r *http.Request, c *client) (*tokenResponse, error) {
 	ctx := r.Context()
 	code := r.PostFormValue("code")
-	var userID, redirect, scope, resource, challenge, expires string
-	var clientID string
+	// One transaction on the single writer connection: consuming the code, spotting a replay,
+	// reading the grant it created and issuing tokens cannot interleave with another exchange.
+	tx, err := s.db.W.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var userID, redirect, scope, resource, challenge, expires, clientID string
 	var used, grantID sql.NullString
-	err := s.db.W.QueryRowContext(ctx, `SELECT client_id, user_id, redirect_uri, scope, resource, code_challenge, expires_at, used_at, grant_id FROM oauth_codes WHERE code_hash = ?`,
+	err = tx.QueryRowContext(ctx, `SELECT client_id, user_id, redirect_uri, scope, resource, code_challenge, expires_at, used_at, grant_id FROM oauth_codes WHERE code_hash = ?`,
 		hash(code)).Scan(&clientID, &userID, &redirect, &scope, &resource, &challenge, &expires, &used, &grantID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, invalidGrant("unknown or expired code")
@@ -100,42 +107,48 @@ func (s *Server) exchangeCode(r *http.Request, c *client) (*tokenResponse, error
 	if err != nil {
 		return nil, err
 	}
-	// Consume the code atomically; the loser of a race, or any replay, lands in the next branch.
-	res, err := s.db.W.ExecContext(ctx, `UPDATE oauth_codes SET used_at = ? WHERE code_hash = ? AND used_at IS NULL`, s.nowStr(), hash(code))
-	if err != nil {
-		return nil, err
-	}
-	if n, _ := res.RowsAffected(); n != 1 {
+	if used.Valid {
+		// A replay revokes what the first exchange issued.
 		if grantID.Valid {
-			_ = s.revokeGrant(ctx, grantID.String, "code_reuse")
+			if err := s.revokeGrantIn(ctx, tx, grantID.String, "code_reuse"); err != nil {
+				return nil, err
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
 		}
 		s.audit(r, userID, "oauth.code_reuse", map[string]any{"client_id": clientID})
 		return nil, invalidGrant("the code was already used")
 	}
+	if _, err := tx.ExecContext(ctx, `UPDATE oauth_codes SET used_at = ? WHERE code_hash = ?`, s.nowStr(), hash(code)); err != nil {
+		return nil, err
+	}
+	// From here a failed check still burns the code, so the burn is committed.
+	burned := func(e error) (*tokenResponse, error) {
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return nil, e
+	}
 	switch {
 	case clientID != c.ID:
-		return nil, invalidGrant("the code was issued to another client")
+		return burned(invalidGrant("the code was issued to another client"))
 	case s.nowStr() >= expires:
-		return nil, invalidGrant("the code expired")
+		return burned(invalidGrant("the code expired"))
 	case r.PostFormValue("redirect_uri") != redirect:
-		return nil, invalidGrant("redirect_uri does not match the authorization request")
+		return burned(invalidGrant("redirect_uri does not match the authorization request"))
 	}
 	if rs := r.PostFormValue("resource"); rs != "" && rs != resource {
-		return nil, &grantError{http.StatusBadRequest, "invalid_target", "resource does not match the authorization request"}
+		return burned(&grantError{http.StatusBadRequest, "invalid_target", "resource does not match the authorization request"})
 	}
 	verifier := r.PostFormValue("code_verifier")
 	if !verifierRe.MatchString(verifier) || subtle.ConstantTimeCompare([]byte(pkceChallenge(verifier)), []byte(challenge)) != 1 {
-		return nil, invalidGrant("PKCE verification failed")
+		return burned(invalidGrant("PKCE verification failed"))
 	}
 	if u, err := s.svc.GetUser(ctx, userID); err != nil || u.Disabled {
-		return nil, invalidGrant("the account cannot connect apps")
+		return burned(invalidGrant("the account cannot connect apps"))
 	}
 
-	tx, err := s.db.W.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
 	gid := newID()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO oauth_grants (id, user_id, client_id, scope, resource, created_at) VALUES (?,?,?,?,?,?)`,
 		gid, userID, c.ID, scope, resource, s.nowStr()); err != nil {

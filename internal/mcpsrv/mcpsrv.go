@@ -80,6 +80,10 @@ func Handler(svc *service.Service, ver Verifier, cfg Config) http.Handler {
 	sdk := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return m }, &mcp.StreamableHTTPOptions{
 		Stateless:    true,
 		JSONResponse: true,
+		// The SDK refuses a public Host header on a loopback connection (a DNS-rebinding guard for
+		// local servers). Behind a reverse proxy that is every request. Blair checks the bearer
+		// token and the Origin itself.
+		DisableLocalhostProtection: true,
 	})
 	return s.authenticate(http.MaxBytesHandler(sdk, 256<<10))
 }
@@ -201,8 +205,8 @@ func toolError(ctx context.Context, tool string, err error) error {
 type toolFn[In, Out any] func(ctx context.Context, u *service.User, in In) (out Out, resourceID string, err error)
 
 // register adds a tool that needs scope, and counts as a write when write is true.
-func register[In, Out any](s *server, m *mcp.Server, t *mcp.Tool, scope string, write bool, fn toolFn[In, Out]) {
-	t.Annotations = annotations(t.Annotations, write)
+func register[In, Out any](s *server, m *mcp.Server, t *mcp.Tool, scope string, write, additive bool, fn toolFn[In, Out]) {
+	t.Annotations = annotations(t.Annotations, write, additive)
 	mcp.AddTool(m, t, func(ctx context.Context, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
 		var zero Out
 		p := principal(ctx)
@@ -250,14 +254,22 @@ func requestOf(ctx context.Context) *http.Request {
 	return r
 }
 
-func annotations(a *mcp.ToolAnnotations, write bool) *mcp.ToolAnnotations {
+// annotations tells clients what a tool does. Only tools that purely add something are marked
+// non-destructive: an edit replaces values, so it is destructive in the protocol's sense even
+// though nothing is ever deleted.
+func annotations(a *mcp.ToolAnnotations, write, additive bool) *mcp.ToolAnnotations {
 	if a == nil {
 		a = &mcp.ToolAnnotations{}
 	}
 	no := false
 	a.OpenWorldHint = &no
 	if write {
-		a.DestructiveHint = &no // nothing here deletes; edits are additive or reversible by editing again
+		yes := true
+		a.DestructiveHint = &yes
+		if additive {
+			a.DestructiveHint = &no
+		}
+		a.IdempotentHint = !additive
 	} else {
 		a.ReadOnlyHint = true
 	}

@@ -124,8 +124,17 @@ func TestToolListHasNoDelete(t *testing.T) {
 		if strings.Contains(strings.ToLower(tl.Name), "delete") || strings.Contains(strings.ToLower(tl.Name), "remove") || strings.Contains(strings.ToLower(tl.Name), "trash") {
 			t.Errorf("tool %q looks destructive", tl.Name)
 		}
-		if tl.Annotations == nil || (tl.Annotations.DestructiveHint != nil && *tl.Annotations.DestructiveHint) {
-			t.Errorf("tool %q is not marked non-destructive", tl.Name)
+		// Only tools that purely add something may claim to be non-destructive; an edit replaces
+		// values, even though nothing is ever deleted.
+		additive := tl.Name == "create_task" || tl.Name == "plan_today"
+		edits := slices.Contains([]string{"update_task", "complete_task", "move_task"}, tl.Name)
+		switch {
+		case tl.Annotations == nil:
+			t.Errorf("tool %q has no annotations", tl.Name)
+		case additive && (tl.Annotations.DestructiveHint == nil || *tl.Annotations.DestructiveHint):
+			t.Errorf("tool %q only adds and should say so", tl.Name)
+		case edits && (tl.Annotations.DestructiveHint == nil || !*tl.Annotations.DestructiveHint):
+			t.Errorf("tool %q replaces values and must not claim to be non-destructive", tl.Name)
 		}
 		if tl.Annotations != nil && tl.Annotations.ReadOnlyHint == slices.Contains([]string{"create_task", "update_task", "complete_task", "move_task", "plan_today"}, tl.Name) {
 			t.Errorf("tool %q has the wrong read-only hint", tl.Name)
@@ -396,5 +405,44 @@ func TestWriteRateLimit(t *testing.T) {
 	// Reads have their own, larger budget.
 	if _, errText := call(t, s, "list_tasks", nil); errText != "" {
 		t.Fatalf("read after the write limit: %q", errText)
+	}
+}
+
+// Behind a reverse proxy the peer is loopback while the Host header is the public name. The SDK's
+// local-server guard would answer every request with 403.
+func TestWorksBehindAReverseProxyWithAPublicHost(t *testing.T) {
+	e := newEnv(t)
+	c := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
+	hostRT := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		r = r.Clone(r.Context())
+		r.Host = "blair.example.com"
+		r.Header.Set("Authorization", "Bearer rw")
+		return http.DefaultTransport.RoundTrip(r)
+	})
+	s, err := c.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: e.srv.URL, HTTPClient: &http.Client{Transport: hostRT}}, nil)
+	if err != nil {
+		t.Fatalf("a public Host header on a loopback connection was refused: %v", err)
+	}
+	defer s.Close()
+	mustCall(t, s, "list_projects", nil)
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestLabelsWithNonASCIINamesWork(t *testing.T) {
+	e := newEnv(t)
+	if _, err := e.svc.CreateLabel(context.Background(), e.user, service.LabelCreate{Name: "École"}); err != nil {
+		t.Fatal(err)
+	}
+	s := e.session("rw")
+	made := mustCall(t, s, "create_task", map[string]any{"title": "x", "labels": []string{"école"}})
+	if l := made["labels"].([]any); len(l) != 1 || l[0] != "École" {
+		t.Fatalf("labels: %v", made["labels"])
+	}
+	upd := mustCall(t, s, "update_task", map[string]any{"id": made["id"], "version": made["version"], "labels": []string{"ÉCOLE"}})
+	if l := upd["labels"].([]any); len(l) != 1 || l[0] != "École" {
+		t.Fatalf("updated labels: %v", upd["labels"])
 	}
 }

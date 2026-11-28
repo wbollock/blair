@@ -30,6 +30,13 @@ func (s *Service) RevokeOAuthGrants(ctx context.Context, userID, reason string) 
 	if _, err := s.db.W.ExecContext(ctx, `DELETE FROM oauth_tokens WHERE kind = 'access' AND grant_id IN (SELECT id FROM oauth_grants WHERE user_id = ? AND revoked_at IS NULL)`, userID); err != nil {
 		return err
 	}
-	_, err := s.db.W.ExecContext(ctx, `UPDATE oauth_grants SET revoked_at = ?, revoked_reason = ? WHERE user_id = ? AND revoked_at IS NULL`, s.now(), reason, userID)
+	if _, err := s.db.W.ExecContext(ctx, `UPDATE oauth_grants SET revoked_at = ?, revoked_reason = ? WHERE user_id = ? AND revoked_at IS NULL`, s.now(), reason, userID); err != nil {
+		return err
+	}
+	// A sign-in in progress or a code not yet exchanged would otherwise still mint a working grant.
+	if _, err := s.db.W.ExecContext(ctx, `DELETE FROM oauth_requests WHERE user_id = ?`, userID); err != nil {
+		return err
+	}
+	_, err := s.db.W.ExecContext(ctx, `DELETE FROM oauth_codes WHERE user_id = ? AND used_at IS NULL`, userID)
 	return err
 }
