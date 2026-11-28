@@ -126,6 +126,9 @@ func TestToolListHasNoDelete(t *testing.T) {
 		}
 		// Only tools that purely add something may claim to be non-destructive; an edit replaces
 		// values, even though nothing is ever deleted.
+		if tl.Annotations != nil && tl.Annotations.IdempotentHint {
+			t.Errorf("tool %q claims to be idempotent; completing a repeating task twice is not", tl.Name)
+		}
 		additive := tl.Name == "create_task" || tl.Name == "plan_today"
 		edits := slices.Contains([]string{"update_task", "complete_task", "move_task"}, tl.Name)
 		switch {
@@ -444,5 +447,24 @@ func TestLabelsWithNonASCIINamesWork(t *testing.T) {
 	upd := mustCall(t, s, "update_task", map[string]any{"id": made["id"], "version": made["version"], "labels": []string{"ÉCOLE"}})
 	if l := upd["labels"].([]any); len(l) != 1 || l[0] != "École" {
 		t.Fatalf("updated labels: %v", upd["labels"])
+	}
+}
+
+func TestTodayCountsEveryOverdueTaskWithoutLoadingThem(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	past := "2000-01-01"
+	for i := range 5 {
+		if _, err := e.svc.CreateTask(ctx, e.user, service.TaskCreate{Title: "late", DueDate: &past}); err != nil {
+			t.Fatal(i, err)
+		}
+	}
+	done := "done"
+	if _, err := e.svc.CreateTask(ctx, e.user, service.TaskCreate{Title: "finished late", DueDate: &past, Status: &done}); err != nil {
+		t.Fatal(err)
+	}
+	s := e.session("rw")
+	if got := mustCall(t, s, "today", nil)["overdue_count"]; got != float64(5) {
+		t.Fatalf("overdue_count = %v, want 5 (finished tasks do not count)", got)
 	}
 }

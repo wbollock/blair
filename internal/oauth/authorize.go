@@ -167,7 +167,7 @@ func (s *Server) authorizeGet(w http.ResponseWriter, r *http.Request) {
 		s.errorPage(w, http.StatusBadRequest, "Unknown app", "This app is not registered. Remove the connector and add it again.")
 		return
 	}
-	if !s.clientFresh(ctx, c) {
+	if !s.clientFresh(c) {
 		s.errorPage(w, http.StatusBadRequest, "This app's registration expired", "Open registration in Blair under Settings, Connected apps, then add the app again.")
 		return
 	}
@@ -392,15 +392,9 @@ func (s *Server) stepMFA(w http.ResponseWriter, r *http.Request, f *flow, c *cli
 func (s *Server) stepConsent(w http.ResponseWriter, r *http.Request, f *flow, c *client, approve bool) {
 	ctx := r.Context()
 	uid := f.UserID.String
-	// Consume the flow first. Two submissions of the same consent form race here, and only the
-	// one whose DELETE removes the row may go on.
-	res, err := s.db.W.ExecContext(ctx, `DELETE FROM oauth_requests WHERE id = ?`, f.ID)
-	if n, _ := res.RowsAffected(); err != nil || n != 1 {
-		s.errorPage(w, http.StatusBadRequest, "This sign-in was already used", "Start again from the app.")
-		return
-	}
 	http.SetCookie(w, &http.Cookie{Name: s.cookieName(), Path: "/", MaxAge: -1, HttpOnly: true, Secure: s.cfg.Secure, SameSite: http.SameSiteLaxMode})
 	if !approve {
+		_, _ = s.db.W.ExecContext(ctx, `DELETE FROM oauth_requests WHERE id = ?`, f.ID)
 		s.audit(r, uid, "oauth.authorize_denied", map[string]any{"client_id": c.ID})
 		s.redirectError(w, r, f.RedirectURI, f.State, "access_denied", "the user declined")
 		return
@@ -409,9 +403,32 @@ func (s *Server) stepConsent(w http.ResponseWriter, r *http.Request, f *flow, c 
 		s.errorPage(w, http.StatusForbidden, "Cannot continue", "This account cannot connect apps.")
 		return
 	}
+	// Consuming the flow and issuing the code are one transaction. Two submissions of the same
+	// form race on the DELETE and only one wins; a password or 2FA change that cancels pending
+	// flows (service.RevokeOAuthGrants, also one transaction) either runs first, and the DELETE
+	// then removes nothing, or runs after and removes the code this inserts.
 	code := prefixCode + random(43)
-	if _, err := s.db.W.ExecContext(ctx, `INSERT INTO oauth_codes (code_hash, client_id, user_id, redirect_uri, scope, resource, code_challenge, expires_at) VALUES (?,?,?,?,?,?,?,?)`,
+	tx, err := s.db.W.BeginTx(ctx, nil)
+	if err != nil {
+		s.errorPage(w, http.StatusInternalServerError, "Something went wrong", "Try again from the app.")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `DELETE FROM oauth_requests WHERE id = ?`, f.ID)
+	if err != nil {
+		s.errorPage(w, http.StatusInternalServerError, "Something went wrong", "Try again from the app.")
+		return
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		s.errorPage(w, http.StatusBadRequest, "This sign-in was already used", "Start again from the app.")
+		return
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO oauth_codes (code_hash, client_id, user_id, redirect_uri, scope, resource, code_challenge, expires_at) VALUES (?,?,?,?,?,?,?,?)`,
 		hash(code), c.ID, uid, f.RedirectURI, f.Scope, f.Resource, f.Challenge, store.FormatTime(s.now().Add(s.cfg.CodeTTL))); err != nil {
+		s.errorPage(w, http.StatusInternalServerError, "Something went wrong", "Try again from the app.")
+		return
+	}
+	if err := tx.Commit(); err != nil {
 		s.errorPage(w, http.StatusInternalServerError, "Something went wrong", "Try again from the app.")
 		return
 	}

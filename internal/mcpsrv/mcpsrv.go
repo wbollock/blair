@@ -269,7 +269,7 @@ func annotations(a *mcp.ToolAnnotations, write, additive bool) *mcp.ToolAnnotati
 		if additive {
 			a.DestructiveHint = &no
 		}
-		a.IdempotentHint = !additive
+		a.IdempotentHint = false // completing a repeating task twice completes two occurrences
 	} else {
 		a.ReadOnlyHint = true
 	}

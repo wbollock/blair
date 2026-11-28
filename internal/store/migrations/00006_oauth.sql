@@ -8,7 +8,8 @@ CREATE TABLE oauth_clients (
     owner_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, -- the account that opened registration; only it can approve this client
     name           TEXT NOT NULL,
     redirect_uris  TEXT NOT NULL,      -- space separated, exact match
-    created_at     TEXT NOT NULL
+    created_at     TEXT NOT NULL,
+    approved_at    TEXT                -- set the first time a code is exchanged; an approved client may reconnect later
 );
 
 -- Registration is closed unless the owner opens a short window in Settings → Connected apps.

@@ -988,3 +988,21 @@ func TestCSPNamesEveryAcceptedCallbackOrigin(t *testing.T) {
 		t.Error("origin listed twice")
 	}
 }
+
+// Housekeeping of old grants must not make an approved app unable to reconnect.
+func TestApprovedClientSurvivesHousekeeping(t *testing.T) {
+	e := newEnv(t)
+	cid := e.register(callback)
+	e.exchange(cid, e.connect(cid, nil), verifier)
+	never := e.register(callback)
+	e.now = e.now.Add(60 * 24 * time.Hour) // refresh tokens and grants are long gone
+	if err := e.svc.Housekeeping(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if res, _ := e.browser().Get(e.authorizeURL(cid, nil)); res.StatusCode != 200 {
+		t.Fatalf("an approved client could not reconnect after housekeeping: %d", res.StatusCode)
+	}
+	if res, _ := e.browser().Get(e.authorizeURL(never, nil)); res.StatusCode != 400 {
+		t.Fatalf("a never-approved client survived: %d", res.StatusCode)
+	}
+}

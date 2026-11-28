@@ -157,6 +157,9 @@ func (s *Server) exchangeCode(r *http.Request, c *client) (*tokenResponse, error
 	if _, err := tx.ExecContext(ctx, `UPDATE oauth_codes SET grant_id = ? WHERE code_hash = ?`, gid, hash(code)); err != nil {
 		return nil, err
 	}
+	if _, err := tx.ExecContext(ctx, `UPDATE oauth_clients SET approved_at = COALESCE(approved_at, ?) WHERE id = ?`, s.nowStr(), c.ID); err != nil {
+		return nil, err
+	}
 	out, err := s.issue(ctx, tx, gid, scope)
 	if err != nil {
 		return nil, err

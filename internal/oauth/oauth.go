@@ -265,6 +265,7 @@ type client struct {
 	ID           string
 	OwnerID      string
 	CreatedAt    string
+	Approved     bool
 	Name         string
 	RedirectURIs []string
 }
@@ -272,7 +273,7 @@ type client struct {
 func (s *Server) client(ctx context.Context, id string) (*client, error) {
 	var c client
 	var uris string
-	err := s.db.R.QueryRowContext(ctx, `SELECT id, owner_id, name, redirect_uris, created_at FROM oauth_clients WHERE id = ?`, id).Scan(&c.ID, &c.OwnerID, &c.Name, &uris, &c.CreatedAt)
+	err := s.db.R.QueryRowContext(ctx, `SELECT id, owner_id, name, redirect_uris, created_at, approved_at IS NOT NULL FROM oauth_clients WHERE id = ?`, id).Scan(&c.ID, &c.OwnerID, &c.Name, &uris, &c.CreatedAt, &c.Approved)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrNotFound
 	}
@@ -372,12 +373,8 @@ func (s *Server) trimGrants(ctx context.Context, userID string) {
 // clientFresh reports whether a client may start an authorization. A client that has never been
 // approved is only good for a few minutes after it registered, so a link built from a stranger's
 // registration (made inside your window) goes stale before it can be used on you. A client that
-// has had a grant (a reconnect) stays usable.
-func (s *Server) clientFresh(ctx context.Context, c *client) bool {
-	if c.CreatedAt >= store.FormatTime(s.now().Add(-(windowTTL + time.Minute))) {
-		return true
-	}
-	var n int
-	err := s.db.R.QueryRowContext(ctx, `SELECT count(*) FROM oauth_grants WHERE client_id = ?`, c.ID).Scan(&n)
-	return err == nil && n > 0
+// has been approved before (a reconnect) stays usable; that is recorded on the client itself so
+// housekeeping of old grants cannot erase it.
+func (s *Server) clientFresh(c *client) bool {
+	return c.Approved || c.CreatedAt >= store.FormatTime(s.now().Add(-(windowTTL+time.Minute)))
 }

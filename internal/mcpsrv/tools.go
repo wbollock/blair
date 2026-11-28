@@ -339,17 +339,9 @@ func (s *server) today(ctx context.Context, u *service.User, _ noIn) (todayOut, 
 	if err != nil {
 		return todayOut{}, "", err
 	}
-	overdue := 0
-	for cursor, pages := "", 0; ; pages++ {
-		over, err := s.svc.ListTasks(ctx, u, service.TaskFilter{Overdue: true, Limit: 1000, Cursor: cursor})
-		if err != nil {
-			return todayOut{}, "", err
-		}
-		overdue += len(over.Data)
-		if over.NextCursor == nil || pages >= 50 {
-			break
-		}
-		cursor = *over.NextCursor
+	overdue, err := s.svc.CountOverdue(ctx, u)
+	if err != nil {
+		return todayOut{}, "", err
 	}
 	return todayOut{Date: date, Planned: r.tasks(plan.Tasks), DueToday: r.tasks(due.Data), OverdueCount: overdue}, "", nil
 }
