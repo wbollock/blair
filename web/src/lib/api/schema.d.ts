@@ -931,7 +931,7 @@ export interface components {
         /** @enum {string} */
         Status: "todo" | "doing" | "waiting" | "done" | "cancelled";
         /** @enum {string} */
-        Scope: "tasks:read" | "tasks:write" | "notes:read" | "notes:write" | "export" | "account:read";
+        Scope: "tasks:read" | "tasks:write" | "tasks:delete" | "notes:read" | "notes:write" | "export" | "account:read";
         Problem: {
             /** @example urn:blair:problem:not_found */
             type: string;
