@@ -570,6 +570,50 @@ checklist. A security review against it is a Phase 9 exit criterion.
 - Sent as `Authorization: Bearer …`. Tokens are not accepted from query strings
   (except a separate, read-only `events` ticket for SSE: see §10.7).
 
+### 9.5.1 MCP connector and OAuth (ADR-0016)
+
+Off unless `BLAIR_MCP_ENABLED=true`. Then Blair is also an OAuth 2.1
+authorization server and a remote MCP server, so claude.ai can use it as a
+custom connector at `https://<host>/mcp`.
+
+- **Endpoint**: `POST /mcp`, Streamable HTTP, stateless (`GET` and `DELETE`
+  answer 405). A request without a valid token gets `401` with
+  `WWW-Authenticate: Bearer resource_metadata="…/.well-known/oauth-protected-resource/mcp"`.
+- **Metadata**: RFC 9728 at `/.well-known/oauth-protected-resource[/mcp]` and
+  RFC 8414 at `/.well-known/oauth-authorization-server`.
+- **Registration**: RFC 7591 at `POST /oauth/register`, public clients only,
+  and only these redirect URIs, matched exactly:
+  `https://claude.ai/api/mcp/auth_callback` and
+  `https://claude.com/api/mcp/auth_callback`. 10 registrations per hour per
+  address, 200 clients in total.
+- **Authorize**: `GET /oauth/authorize` shows Blair's own sign-in (password,
+  then the 2FA code if enabled), then a consent screen. PKCE with `S256` is
+  required (`plain` is refused). The flow is tied to the browser by a cookie
+  and a per-step CSRF token, expires after 10 minutes, and allows 5 wrong 2FA
+  codes. The page has no scripts and a CSP that names the two callbacks.
+- **Tokens**: authorization codes live 60 seconds and work once. Access tokens
+  (`blair_oat_…`) live 1 hour. Refresh tokens (`blair_ort_…`) live 30 days and
+  rotate on every use; using an old one again revokes the whole grant, as does
+  replaying a code. Only hashes are stored.
+- **Scopes**: `tasks:read` and `tasks:write` only. `tasks:delete`, notes and
+  account scopes cannot be granted. A token is bound to the `/mcp` resource
+  and is refused with 403 on every `/api/v1` route.
+- **Tools** (no delete): `list_tasks`, `search`, `get_task`, `today`,
+  `overdue`, `slipping`, `list_projects`, `create_task`, `update_task`
+  (needs the task's `version`, the ETag), `complete_task`, `move_task`,
+  `plan_today` (adds only).
+- **Limits**: 120 requests per minute and 30 writes per minute per grant;
+  failed authentication 30 per minute per address; token endpoint 60 per minute
+  per address.
+- **Audit**: `oauth.authorize`, `oauth.authorize_denied`, `oauth.token_issued`,
+  `oauth.token_refreshed`, `oauth.refresh_reuse`, `oauth.code_reuse`,
+  `oauth.revoke`, `oauth.login_failure`, `oauth.mfa_failure`, and `mcp.write`
+  (tool name, grant, task id; never titles or text). Connecting an app and a
+  refresh-token reuse also raise a notification.
+- **Settings → Connected apps** lists grants and revokes them
+  (`GET /me/connected-apps`, `DELETE /me/connected-apps/{id}`; browser session
+  only). Revoking works even when the feature is switched off.
+
 ### 9.6 Request protections
 
 - **CSRF**: cookie-authenticated unsafe requests pass Go's
@@ -911,6 +955,8 @@ surprise reloads mid-typing).
 | `BLAIR_SECRET_KEY` | auto-generated to `$DATA_DIR/secret.key` (0600) | Encryption key material |
 | `BLAIR_REGISTRATION` | `closed` | `closed` \| `invite` \| `open` |
 | `BLAIR_REQUIRE_2FA` | `false` | Force 2FA enrollment |
+| `BLAIR_MCP_ENABLED` | `false` | Serve `/mcp` and `/oauth/*` (§9.5.1). Needs an https `BLAIR_BASE_URL` |
+| `BLAIR_OAUTH_EXTRA_REDIRECT_URIS` | — | Extra OAuth callbacks, comma separated. For local testing (for example MCP Inspector); leave unset in production |
 | `BLAIR_TRUSTED_PROXIES` | `127.0.0.1/32,::1/128` | For client IP |
 | `BLAIR_BACKUP_INTERVAL` / `BLAIR_BACKUP_KEEP` | `24h` / `14` | Built-in `VACUUM INTO` backups to `$DATA_DIR/backups` |
 | `BLAIR_LOG_LEVEL` | `info` | |
