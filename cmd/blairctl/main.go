@@ -130,19 +130,41 @@ func (c *client) do(method, path string, query url.Values, body any) ([]byte, er
 }
 
 // parseFlags parses flags that may appear before or after positional
-// arguments and returns the positionals.
+// arguments and returns the positionals. A bare "--" ends flag parsing, and
+// everything after it is positional. A flag that takes a value consumes the
+// next argument even when that argument is "--".
 func parseFlags(fs *flag.FlagSet, args []string) ([]string, error) {
 	var positional []string
-	for {
-		if err := fs.Parse(args); err != nil {
-			return nil, err
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			return append(positional, args[i+1:]...), nil
 		}
-		if fs.NArg() == 0 {
-			return positional, nil
+		if len(arg) < 2 || arg[0] != '-' {
+			positional = append(positional, arg)
+			continue
 		}
-		positional = append(positional, fs.Arg(0))
-		args = fs.Args()[1:]
+		name, value, hasValue := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+		f := fs.Lookup(name)
+		if f == nil {
+			return nil, fmt.Errorf("unknown flag: %s", arg)
+		}
+		if b, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && b.IsBoolFlag() {
+			if !hasValue {
+				value = "true"
+			}
+		} else if !hasValue {
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("flag needs a value: %s", arg)
+			}
+			i++
+			value = args[i]
+		}
+		if err := fs.Set(name, value); err != nil {
+			return nil, fmt.Errorf("invalid value for %s: %w", arg, err)
+		}
 	}
+	return positional, nil
 }
 
 func newFlagSet(name string) (*flag.FlagSet, *bool) {
@@ -212,24 +234,39 @@ func (c *client) projectList(args []string, out io.Writer) error {
 	return nil
 }
 
-// projectID resolves a project name to its id.
+// projectID resolves a project name to its id. Archived projects match too,
+// and an active project wins over an archived one with the same name.
 func (c *client) projectID(name string) (string, error) {
-	raw, err := c.do("GET", "/projects", nil, nil)
+	raw, err := c.do("GET", "/projects", url.Values{"include_archived": {"true"}}, nil)
 	if err != nil {
 		return "", err
 	}
 	var res struct {
-		Data []struct{ ID, Name string } `json:"data"`
+		Data []struct {
+			ID         string  `json:"id"`
+			Name       string  `json:"name"`
+			ArchivedAt *string `json:"archived_at"`
+		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return "", err
 	}
+	archivedID := ""
 	for _, p := range res.Data {
-		if strings.EqualFold(p.Name, name) {
+		if !strings.EqualFold(p.Name, name) {
+			continue
+		}
+		if p.ArchivedAt == nil {
 			return p.ID, nil
 		}
+		if archivedID == "" {
+			archivedID = p.ID
+		}
 	}
-	return "", fmt.Errorf("project not found: %s", name)
+	if archivedID == "" {
+		return "", fmt.Errorf("project not found: %s", name)
+	}
+	return archivedID, nil
 }
 
 func (c *client) taskList(args []string, out io.Writer) error {
@@ -345,6 +382,13 @@ func (c *client) taskAdd(args []string, out io.Writer) error {
 	text := strings.Join(pos, " ")
 	if *quick {
 		body["quick_add"] = text
+		if *fields.project != "" {
+			id, err := c.projectID(*fields.project)
+			if err != nil {
+				return err
+			}
+			body["context_project_id"] = id
+		}
 	} else {
 		body["title"] = text
 	}

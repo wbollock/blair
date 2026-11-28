@@ -16,9 +16,16 @@ import (
 	"github.com/wbollock/blair/internal/store"
 )
 
-// startServer runs a real Blair API on a temp database and returns an
-// environment lookup that points blairctl at it.
-func startServer(t *testing.T) func(string) string {
+// server is a real Blair API on a temp database.
+type server struct {
+	svc  *service.Service
+	user *service.User
+	env  func(string) string
+}
+
+// startServer runs the server and returns it with an environment lookup that
+// points blairctl at it.
+func startServer(t *testing.T) *server {
 	t.Helper()
 	ctx := context.Background()
 	db, err := store.Open(ctx, t.TempDir())
@@ -44,7 +51,7 @@ func startServer(t *testing.T) func(string) string {
 		Version:        "test",
 	}))
 	t.Cleanup(srv.Close)
-	return func(k string) string {
+	return &server{svc: svc, user: user, env: func(k string) string {
 		switch k {
 		case "BLAIR_URL":
 			return srv.URL
@@ -52,7 +59,7 @@ func startServer(t *testing.T) func(string) string {
 			return tok.Token
 		}
 		return ""
-	}
+	}}
 }
 
 func runOK(t *testing.T, env func(string) string, args ...string) string {
@@ -65,7 +72,7 @@ func runOK(t *testing.T, env func(string) string, args ...string) string {
 }
 
 func TestTaskLifecycle(t *testing.T) {
-	env := startServer(t)
+	env := startServer(t).env
 
 	var created struct {
 		ID          string `json:"id"`
@@ -107,7 +114,7 @@ func TestTaskLifecycle(t *testing.T) {
 }
 
 func TestProjectList(t *testing.T) {
-	runOK(t, startServer(t), "project", "list")
+	runOK(t, startServer(t).env, "project", "list")
 }
 
 func TestMissingConfiguration(t *testing.T) {
@@ -118,9 +125,71 @@ func TestMissingConfiguration(t *testing.T) {
 }
 
 func TestAPIErrorIsReported(t *testing.T) {
-	env := startServer(t)
+	env := startServer(t).env
 	err := run([]string{"task", "get", "01a20ff8-c9e8-7321-be6a-4fd914c66faf"}, env, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "404") {
 		t.Fatalf("err = %v, want a 404 message", err)
+	}
+}
+
+func TestEndOfOptionsKeepsRestAsTitle(t *testing.T) {
+	env := startServer(t).env
+	var created struct {
+		Title    string `json:"title"`
+		Priority int    `json:"priority"`
+	}
+	out := runOK(t, env, "task", "add", "--json", "--", "Fix", "--priority", "4")
+	if err := json.Unmarshal([]byte(out), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Title != "Fix --priority 4" || created.Priority != 0 {
+		t.Fatalf("created = %+v", created)
+	}
+
+	var withValue struct {
+		Title       string `json:"title"`
+		Description string `json:"description"`
+	}
+	out = runOK(t, env, "task", "add", "--json", "-description", "--", "Title")
+	if err := json.Unmarshal([]byte(out), &withValue); err != nil {
+		t.Fatal(err)
+	}
+	if withValue.Title != "Title" || withValue.Description != "--" {
+		t.Fatalf("created = %+v", withValue)
+	}
+}
+
+func TestArchivedProjectIsListable(t *testing.T) {
+	s := startServer(t)
+	ctx := context.Background()
+	p, err := s.svc.CreateProject(ctx, s.user, service.ProjectCreate{Name: "Old"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runOK(t, s.env, "task", "add", "In old project", "-project", "Old")
+	if _, err := s.svc.UpdateProject(ctx, s.user, p.ID, service.ProjectPatch{Archived: service.Opt[bool]{Set: true, V: true}}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if list := runOK(t, s.env, "task", "list", "-project", "Old"); !strings.Contains(list, "In old project") {
+		t.Fatalf("archived project tasks missing:\n%s", list)
+	}
+}
+
+func TestQuickAddResolvesColumnInSelectedProject(t *testing.T) {
+	s := startServer(t)
+	ctx := context.Background()
+	if _, err := s.svc.CreateProject(ctx, s.user, service.ProjectCreate{Name: "Homelab"}); err != nil {
+		t.Fatal(err)
+	}
+	out := runOK(t, s.env, "task", "add", "-quick", "-project", "Homelab", "-json", "Fix gutter /Doing")
+	var created struct {
+		Title  string `json:"title"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(out), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Title != "Fix gutter" || created.Status != "doing" {
+		t.Fatalf("created = %+v", created)
 	}
 }
