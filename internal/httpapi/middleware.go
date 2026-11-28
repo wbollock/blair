@@ -311,3 +311,28 @@ func adminOnly(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	}))
 }
+
+// cidrGate answers 403 unless the client address is inside one of the prefixes. An empty list
+// allows everyone. exempt names requests that must stay open (the browser sign-in pages).
+func cidrGate(prefixes []netip.Prefix, exempt func(*http.Request) bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		if len(prefixes) == 0 {
+			return next
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if exempt != nil && exempt(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if ip, err := netip.ParseAddr(clientIP(r.Context())); err == nil {
+				for _, p := range prefixes {
+					if p.Contains(ip.Unmap()) {
+						next.ServeHTTP(w, r)
+						return
+					}
+				}
+			}
+			writeProblem(w, r, http.StatusForbidden, "forbidden", "Forbidden", "")
+		})
+	}
+}

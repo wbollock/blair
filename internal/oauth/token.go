@@ -151,6 +151,7 @@ func (s *Server) exchangeCode(r *http.Request, c *client) (*tokenResponse, error
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
+	s.trimGrants(ctx, userID)
 	s.audit(r, userID, "oauth.token_issued", map[string]any{"client_id": c.ID, "grant_id": gid})
 	return out, nil
 }

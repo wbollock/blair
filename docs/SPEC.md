@@ -581,13 +581,16 @@ custom connector at `https://<host>/mcp`.
   `WWW-Authenticate: Bearer resource_metadata="…/.well-known/oauth-protected-resource/mcp"`.
 - **Metadata**: RFC 9728 at `/.well-known/oauth-protected-resource[/mcp]` and
   RFC 8414 at `/.well-known/oauth-authorization-server`.
-- **Registration**: RFC 7591 at `POST /oauth/register`, public clients only,
-  and only these redirect URIs, matched exactly:
+- **Registration**: RFC 7591 at `POST /oauth/register`, public clients only. Refused
+  unless the owner opened a 10-minute window (`POST /me/connected-apps/registration`,
+  3 uses, 2FA required); the client then belongs to that account. Only these redirect URIs
+  are accepted, matched exactly:
   `https://claude.ai/api/mcp/auth_callback` and
   `https://claude.com/api/mcp/auth_callback`. 10 registrations per hour per
-  address, 200 clients in total.
+  address.
 - **Authorize**: `GET /oauth/authorize` shows Blair's own sign-in (password,
-  then the 2FA code if enabled), then a consent screen. PKCE with `S256` is
+  then the 2FA code, which must be enabled), then a consent screen. Only the account that
+  opened registration can approve the client. PKCE with `S256` is
   required (`plain` is refused). The flow is tied to the browser by a cookie
   and a per-step CSRF token, expires after 10 minutes, and allows 5 wrong 2FA
   codes. The page has no scripts and a CSP that names the two callbacks.
@@ -956,6 +959,7 @@ surprise reloads mid-typing).
 | `BLAIR_REGISTRATION` | `closed` | `closed` \| `invite` \| `open` |
 | `BLAIR_REQUIRE_2FA` | `false` | Force 2FA enrollment |
 | `BLAIR_MCP_ENABLED` | `false` | Serve `/mcp` and `/oauth/*` (§9.5.1). Needs an https `BLAIR_BASE_URL` |
+| `BLAIR_MCP_ALLOWED_CIDRS` | — | Optional. Only these addresses may call `/mcp`, `/oauth/token`, `/oauth/register`, `/oauth/revoke` and the discovery documents |
 | `BLAIR_OAUTH_EXTRA_REDIRECT_URIS` | — | Extra OAuth callbacks, comma separated. For local testing (for example MCP Inspector); leave unset in production |
 | `BLAIR_TRUSTED_PROXIES` | `127.0.0.1/32,::1/128` | For client IP |
 | `BLAIR_BACKUP_INTERVAL` / `BLAIR_BACKUP_KEEP` | `24h` / `14` | Built-in `VACUUM INTO` backups to `$DATA_DIR/backups` |

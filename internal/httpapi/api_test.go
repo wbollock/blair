@@ -41,6 +41,11 @@ func newHarness(t *testing.T, opts service.Options) *harness {
 // newHarnessWith can serve the MCP connector; it needs the server's own URL as the issuer.
 func newHarnessWith(t *testing.T, opts service.Options, mcp bool) *harness {
 	t.Helper()
+	return newHarnessCfg(t, opts, mcp, nil)
+}
+
+func newHarnessCfg(t *testing.T, opts service.Options, mcp bool, mutate func(*Config)) *harness {
+	t.Helper()
 	db, err := store.Open(context.Background(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -56,6 +61,9 @@ func newHarnessWith(t *testing.T, opts service.Options, mcp bool) *harness {
 	if mcp {
 		cfg.BaseURL, _ = url.Parse("http://" + h.srv.Listener.Addr().String())
 		cfg.MCPEnabled = true
+	}
+	if mutate != nil {
+		mutate(&cfg)
 	}
 	h.srv.Config.Handler = New(svc, db, cfg)
 	h.srv.Start()

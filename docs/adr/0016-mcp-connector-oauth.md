@@ -15,11 +15,11 @@ it a way to destroy data or to reach the rest of the API.
   authorization code only, PKCE `S256` only, public clients only, exact
   redirect URI match, RFC 8414 / 9728 metadata, RFC 7591 registration, RFC 7009
   revocation, RFC 9207 `iss` in the redirect, RFC 8707 `resource`.
-- **Registration is open but narrow.** Anyone can register a client, but only
-  with the two Claude callback URLs. A malicious client therefore can never
-  receive a code. Registrations are rate-limited, capped at 200, and pruned
-  after a day if never used. The client name is untrusted text and is only
-  shown escaped, labelled as unverified.
+- **Registration is closed unless the owner opens it.** Settings → Connected apps opens a
+  10-minute window (3 uses, 2FA required). A client registered in it belongs to that account,
+  and only that account can approve it. This stops a stranger registering an app and sending
+  the owner its authorize link. Only the two Claude callback URLs are accepted, so a code can
+  never reach another site. The name is untrusted text, shown escaped and labelled unverified.
 - **Short-lived, rotating, bound tokens.** Codes 60 s. Access tokens 1 h.
   Refresh tokens 30 d, rotated on every use. Reuse of a rotated refresh token,
   or of a code, revokes the whole grant. Tokens are opaque, stored as SHA-256
@@ -34,6 +34,12 @@ it a way to destroy data or to reach the rest of the API.
   `If-Match` semantics an agent could silently overwrite a newer edit.
   `plan_today` only adds. Unknown projects and labels are errors, never
   created implicitly.
+- **2FA is required** to approve an app, because an app keeps working for 30 days. At most 10
+  apps per account (the oldest is revoked). Changing or resetting the password, or turning 2FA
+  off or resetting it, disconnects every app.
+- **Optional address list.** `BLAIR_MCP_ALLOWED_CIDRS` limits `/mcp`, `/oauth/token`,
+  `/oauth/register`, `/oauth/revoke` and the discovery documents to given addresses. The
+  sign-in page stays open.
 - **Off by default.** `BLAIR_MCP_ENABLED=false` mounts nothing (404). The
   Connected apps page and revocation still work when it is off.
 - **A separate Origin check on `/mcp`** accepts no browser origin except

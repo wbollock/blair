@@ -35,9 +35,12 @@ type env struct {
 	db   *store.DB
 	user *service.User
 	now  time.Time
+	totp string // the user's 2FA secret; empty when the env was built without 2FA
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T) *env { return newEnvWith(t, true) }
+
+func newEnvWith(t *testing.T, withTOTP bool) *env {
 	t.Helper()
 	db, err := store.Open(context.Background(), t.TempDir())
 	if err != nil {
@@ -60,7 +63,28 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if withTOTP {
+		ctx := context.Background()
+		setup, err := svc.BeginTOTP(ctx, e.user)
+		if err != nil {
+			t.Fatal(err)
+		}
+		u, _ := svc.GetUser(ctx, e.user.ID)
+		cc, _ := auth.TOTPCodeAt(setup.Secret, e.now)
+		if _, err := svc.ConfirmTOTP(ctx, u, cc); err != nil {
+			t.Fatal(err)
+		}
+		e.totp = setup.Secret
+		e.user, _ = svc.GetUser(ctx, e.user.ID)
+	}
 	return e
+}
+
+// code returns a fresh TOTP code. Codes cannot be replayed, so the clock moves to the next step.
+func (e *env) code() string {
+	e.now = e.now.Add(31 * time.Second)
+	c, _ := auth.TOTPCodeAt(e.totp, e.now)
+	return c
 }
 
 func (e *env) browser() *http.Client {
@@ -83,6 +107,9 @@ func (e *env) postJSON(path string, body any) (int, map[string]any) {
 
 func (e *env) register(redirect string) string {
 	e.t.Helper()
+	if _, err := e.o.OpenRegistration(context.Background(), e.user.ID); err != nil {
+		e.t.Fatal(err)
+	}
 	code, out := e.postJSON("/oauth/register", map[string]any{"client_name": "Claude", "redirect_uris": []string{redirect}, "token_endpoint_auth_method": "none"})
 	if code != 201 {
 		e.t.Fatalf("register: %d %v", code, out)
@@ -124,7 +151,7 @@ func fields(t *testing.T, body string) url.Values {
 		v.Set(m[1], m[2])
 	}
 	if v.Get("req") == "" || v.Get("csrf") == "" {
-		t.Fatalf("no form in page: %.300s", body)
+		t.Fatalf("no form in page: %s", regexp.MustCompile(`<main>.*</main>`).FindString(strings.ReplaceAll(body, "\n", " ")))
 	}
 	return v
 }
@@ -156,6 +183,10 @@ func (e *env) connect(clientID string, extra url.Values) string {
 	f.Set("action", "login")
 	f.Set("email", "will@example.com")
 	f.Set("password", testPW)
+	res = post(e.t, c, e, f)
+	f = fields(e.t, read(res))
+	f.Set("action", "mfa")
+	f.Set("code", e.code())
 	res = post(e.t, c, e, f)
 	f = fields(e.t, read(res))
 	f.Set("action", "approve")
@@ -216,9 +247,12 @@ func TestMetadata(t *testing.T) {
 func TestRegistrationOnlyAcceptsClaudeCallbacks(t *testing.T) {
 	e := newEnv(t)
 	e.o.regIP = ratelimit.New(time.Hour, 1000) // this test sends many requests from one address
+	e.openWindow()
 	for _, ok := range []string{"https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback"} {
+		e.openWindow()
 		e.register(ok)
 	}
+	e.openWindow()
 	for _, bad := range []string{"https://evil.example/cb", "http://claude.ai/api/mcp/auth_callback", "https://claude.ai/api/mcp/auth_callback/",
 		"https://claude.ai.evil.example/api/mcp/auth_callback", "https://claude.ai/api/mcp/auth_callback?x=1", "http://localhost:6274/oauth/callback"} {
 		if st, out := e.postJSON("/oauth/register", map[string]any{"redirect_uris": []string{bad}}); st != 400 || out["error"] != "invalid_redirect_uri" {
@@ -239,12 +273,131 @@ func TestRegistrationOnlyAcceptsClaudeCallbacks(t *testing.T) {
 func TestRegistrationRateLimit(t *testing.T) {
 	e := newEnv(t)
 	for i := range 10 {
+		e.openWindow()
 		if st, _ := e.postJSON("/oauth/register", map[string]any{"redirect_uris": []string{callback}}); st != 201 {
 			t.Fatalf("registration %d: %d", i, st)
 		}
 	}
+	e.openWindow()
 	if st, _ := e.postJSON("/oauth/register", map[string]any{"redirect_uris": []string{callback}}); st != 429 {
 		t.Fatalf("11th registration: %d, want 429", st)
+	}
+}
+
+func (e *env) openWindow() {
+	e.t.Helper()
+	if _, err := e.o.OpenRegistration(context.Background(), e.user.ID); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// Nobody can register a client unless the owner opened the window, and a window holds three uses
+// and lasts ten minutes. Otherwise a stranger could create an app for the owner to approve.
+func TestRegistrationNeedsAnOpenWindow(t *testing.T) {
+	e := newEnv(t)
+	body := map[string]any{"redirect_uris": []string{callback}}
+	if st, out := e.postJSON("/oauth/register", body); st != 403 || out["error"] != "access_denied" {
+		t.Fatalf("no window: %d %v", st, out)
+	}
+	e.openWindow()
+	for i := range 3 {
+		if st, _ := e.postJSON("/oauth/register", body); st != 201 {
+			t.Fatalf("use %d: %d", i, st)
+		}
+	}
+	if st, _ := e.postJSON("/oauth/register", body); st != 403 {
+		t.Fatalf("4th use: %d, want 403", st)
+	}
+	e.openWindow()
+	e.now = e.now.Add(11 * time.Minute)
+	if st, _ := e.postJSON("/oauth/register", body); st != 403 {
+		t.Fatalf("expired window: %d, want 403", st)
+	}
+}
+
+// Only the account that opened registration can approve the client.
+func TestOnlyTheOwnerCanApproveTheClient(t *testing.T) {
+	e := newEnv(t)
+	cid := e.register(callback)
+	other, err := e.svc.CreateUser(context.Background(), service.NewUser{Email: "other@example.com", Password: "plum-orbit-kettle-92", Timezone: "UTC"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := e.browser()
+	res, _ := c.Get(e.authorizeURL(cid, nil))
+	f := fields(t, read(res))
+	f.Set("action", "login")
+	f.Set("email", other.Email)
+	f.Set("password", "plum-orbit-kettle-92")
+	res = post(t, c, e, f)
+	body := read(res)
+	if res.StatusCode != 403 || !strings.Contains(body, "different account") || strings.Contains(body, `name="code"`) {
+		t.Fatalf("another account got past login: %d %.200s", res.StatusCode, body)
+	}
+}
+
+func TestAConnectionNeedsTwoFactor(t *testing.T) {
+	e := newEnvWith(t, false)
+	cid := e.register(callback)
+	c := e.browser()
+	res, _ := c.Get(e.authorizeURL(cid, nil))
+	f := fields(t, read(res))
+	f.Set("action", "login")
+	f.Set("email", "will@example.com")
+	f.Set("password", testPW)
+	res = post(t, c, e, f)
+	body := read(res)
+	if res.StatusCode != 403 || !strings.Contains(body, "two-factor") || strings.Contains(body, "Allow") {
+		t.Fatalf("an account without 2FA got through: %d %.200s", res.StatusCode, body)
+	}
+}
+
+func TestPasswordChangeAnd2FAResetDisconnectApps(t *testing.T) {
+	for _, tc := range []string{"password", "2fa", "admin password reset"} {
+		e := newEnv(t)
+		cid := e.register(callback)
+		_, tok := e.exchange(cid, e.connect(cid, nil), verifier)
+		ctx := context.Background()
+		u, _ := e.svc.GetUser(ctx, e.user.ID)
+		var err error
+		switch tc {
+		case "password":
+			err = e.svc.ChangePassword(ctx, u, testPW, "plum-orbit-kettle-93", "")
+		case "2fa":
+			_, err = e.svc.AdminUpdateUser(ctx, &service.User{ID: "cli"}, u.ID, service.AdminUserPatch{Reset2FA: service.Some(true)})
+		default:
+			_, err = e.svc.AdminUpdateUser(ctx, &service.User{ID: "cli"}, u.ID, service.AdminUserPatch{Password: service.Some("plum-orbit-kettle-94")})
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", tc, err)
+		}
+		if _, err := e.o.VerifyAccessToken(ctx, tok["access_token"].(string)); err == nil {
+			t.Errorf("%s: access token survived", tc)
+		}
+		if st, _ := e.refresh(cid, tok["refresh_token"].(string)); st != 400 {
+			t.Errorf("%s: refresh token survived", tc)
+		}
+	}
+}
+
+func TestOnlyTenConnectionsPerAccount(t *testing.T) {
+	e := newEnv(t)
+	for _, l := range []**ratelimit.Limiter{&e.o.loginIP, &e.o.loginAcct, &e.o.mfaIP, &e.o.mfaAcct, &e.o.regIP} {
+		*l = ratelimit.New(time.Hour, 1000) // eleven sign-ins from one address in a second
+	}
+	var first map[string]any
+	for i := range 11 {
+		cid := e.register(callback)
+		_, tok := e.exchange(cid, e.connect(cid, nil), verifier)
+		if i == 0 {
+			first = tok
+		}
+	}
+	if _, err := e.o.VerifyAccessToken(context.Background(), first["access_token"].(string)); err == nil {
+		t.Fatal("the 11th connection did not push out the oldest")
+	}
+	if apps, _ := e.o.ListGrants(context.Background(), e.user.ID); len(apps) != 10 {
+		t.Fatalf("%d live connections, want 10", len(apps))
 	}
 }
 
@@ -415,6 +568,7 @@ func TestAuthorizeRequestValidation(t *testing.T) {
 
 func TestConsentShowsEscapedClientNameAndSetsSecurityHeaders(t *testing.T) {
 	e := newEnv(t)
+	e.openWindow()
 	st, out := e.postJSON("/oauth/register", map[string]any{"client_name": `<script>alert(1)</script>`, "redirect_uris": []string{callback}})
 	if st != 201 {
 		t.Fatal(out)
@@ -491,44 +645,35 @@ func TestLoginFailureAndExpiry(t *testing.T) {
 	}
 }
 
-func TestTwoFactorStep(t *testing.T) {
-	e := newEnv(t)
-	ctx := context.Background()
-	setup, err := e.svc.BeginTOTP(ctx, e.user)
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, _ := e.svc.GetUser(ctx, e.user.ID)
-	codeNow, _ := auth.TOTPCodeAt(setup.Secret, e.now)
-	if _, err := e.svc.ConfirmTOTP(ctx, u, codeNow); err != nil {
-		t.Fatal(err)
-	}
-	e.now = e.now.Add(31 * time.Second) // next TOTP step; the enrolment code is replay-protected
-
-	cid := e.register(callback)
-	c := e.browser()
+func (e *env) toMFA(c *http.Client, cid string) (url.Values, string) {
+	e.t.Helper()
 	res, _ := c.Get(e.authorizeURL(cid, nil))
-	f := fields(t, read(res))
+	f := fields(e.t, read(res))
 	f.Set("action", "login")
 	f.Set("email", "will@example.com")
 	f.Set("password", testPW)
-	res = post(t, c, e, f)
-	body := read(res)
+	body := read(post(e.t, c, e, f))
 	if !strings.Contains(body, `name="code"`) {
-		t.Fatalf("expected the 2FA step: %.300s", body)
+		e.t.Fatalf("expected the 2FA step: %.300s", body)
 	}
-	f = fields(t, body)
+	return fields(e.t, body), body
+}
+
+func TestTwoFactorStep(t *testing.T) {
+	e := newEnv(t)
+	cid := e.register(callback)
+	c := e.browser()
+	f, _ := e.toMFA(c, cid)
 	f.Set("action", "mfa")
 	f.Set("code", "000000")
-	res = post(t, c, e, f)
-	body = read(res)
+	res := post(t, c, e, f)
+	body := read(res)
 	if res.StatusCode != 401 {
 		t.Fatalf("wrong code: %d", res.StatusCode)
 	}
-	good, _ := auth.TOTPCodeAt(setup.Secret, e.now)
 	f = fields(t, body)
 	f.Set("action", "mfa")
-	f.Set("code", good)
+	f.Set("code", e.code())
 	res = post(t, c, e, f)
 	body = read(res)
 	if res.StatusCode != 200 || !strings.Contains(body, "Allow") {
@@ -536,35 +681,22 @@ func TestTwoFactorStep(t *testing.T) {
 	}
 	f = fields(t, body)
 	f.Set("action", "approve")
-	res = post(t, c, e, f)
-	if res.StatusCode != 302 || !strings.Contains(res.Header.Get("Location"), "code=") {
+	if res = post(t, c, e, f); res.StatusCode != 302 || !strings.Contains(res.Header.Get("Location"), "code=") {
 		t.Fatalf("approve: %d", res.StatusCode)
 	}
 }
 
 func TestTwoFactorAttemptCap(t *testing.T) {
 	e := newEnv(t)
-	ctx := context.Background()
-	setup, _ := e.svc.BeginTOTP(ctx, e.user)
-	u, _ := e.svc.GetUser(ctx, e.user.ID)
-	cc, _ := auth.TOTPCodeAt(setup.Secret, e.now)
-	if _, err := e.svc.ConfirmTOTP(ctx, u, cc); err != nil {
-		t.Fatal(err)
-	}
 	cid := e.register(callback)
 	c := e.browser()
-	res, _ := c.Get(e.authorizeURL(cid, nil))
-	f := fields(t, read(res))
-	f.Set("action", "login")
-	f.Set("email", "will@example.com")
-	f.Set("password", testPW)
-	body := read(post(t, c, e, f))
+	f, body := e.toMFA(c, cid)
 	last := 0
 	for range 6 {
 		f = fields(t, body)
 		f.Set("action", "mfa")
 		f.Set("code", "000000")
-		res = post(t, c, e, f)
+		res := post(t, c, e, f)
 		last = res.StatusCode
 		body = read(res)
 		if last == 400 || last == 429 {
@@ -585,6 +717,9 @@ func TestDeny(t *testing.T) {
 	f.Set("action", "login")
 	f.Set("email", "will@example.com")
 	f.Set("password", testPW)
+	f = fields(t, read(post(t, c, e, f)))
+	f.Set("action", "mfa")
+	f.Set("code", e.code())
 	f = fields(t, read(post(t, c, e, f)))
 	f.Set("action", "deny")
 	res = post(t, c, e, f)

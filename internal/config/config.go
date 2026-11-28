@@ -33,8 +33,9 @@ type Config struct {
 	MetricsToken   string
 	DebugAddr      string
 	SecureCookies  bool
-	MCPEnabled     bool     // serve /mcp and /oauth (ADR-0016)
-	OAuthRedirects []string // extra OAuth callbacks, for local testing only
+	MCPEnabled     bool           // serve /mcp and /oauth (ADR-0016)
+	OAuthRedirects []string       // extra OAuth callbacks, for local testing only
+	MCPCIDRs       []netip.Prefix // when set, /mcp and the OAuth data endpoints only answer these addresses
 }
 
 func env(key, def string) string {
@@ -81,6 +82,16 @@ func Load() (*Config, error) {
 	}
 	if c.MCPEnabled && u.Scheme != "https" && u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1" {
 		return nil, fmt.Errorf("BLAIR_MCP_ENABLED needs an https BLAIR_BASE_URL, got %q", base)
+	}
+	for _, v := range strings.Split(os.Getenv("BLAIR_MCP_ALLOWED_CIDRS"), ",") {
+		if v = strings.TrimSpace(v); v == "" {
+			continue
+		}
+		pfx, err := netip.ParsePrefix(v)
+		if err != nil {
+			return nil, fmt.Errorf("BLAIR_MCP_ALLOWED_CIDRS: %w", err)
+		}
+		c.MCPCIDRs = append(c.MCPCIDRs, pfx)
 	}
 	for _, v := range strings.Split(os.Getenv("BLAIR_OAUTH_EXTRA_REDIRECT_URIS"), ",") {
 		v = strings.TrimSpace(v)

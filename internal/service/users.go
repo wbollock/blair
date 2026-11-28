@@ -565,6 +565,9 @@ func (s *Service) ChangePassword(ctx context.Context, u *User, current, next, ke
 	if _, err := s.db.W.ExecContext(ctx, `UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = ? WHERE id = ?`, h, s.now(), u.ID); err != nil {
 		return err
 	}
+	if err := s.RevokeOAuthGrants(ctx, u.ID, "password_changed"); err != nil {
+		return err
+	}
 	return s.RevokeOtherSessions(ctx, u.ID, keepSession)
 }
 
@@ -680,6 +683,9 @@ func (s *Service) DisableTOTP(ctx context.Context, u *User, password, code strin
 }
 
 func (s *Service) resetTOTP(ctx context.Context, userID string) error {
+	if err := s.RevokeOAuthGrants(ctx, userID, "2fa_reset"); err != nil {
+		return err
+	}
 	return s.db.Tx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE users SET totp_secret_enc = NULL, totp_enabled_at = NULL, totp_last_step = 0 WHERE id = ?`, userID); err != nil {
 			return err
@@ -930,6 +936,9 @@ func (s *Service) AdminUpdateUser(ctx context.Context, admin *User, id string, p
 			return nil, err
 		}
 		_ = s.RevokeOtherSessions(ctx, id, "")
+		if err := s.RevokeOAuthGrants(ctx, id, "password_reset"); err != nil {
+			return nil, err
+		}
 	}
 	_ = u
 	return s.userByID(ctx, s.db.R, id)

@@ -135,6 +135,14 @@
 	async function loadApps() {
 		apps = (await ok(api.GET('/me/connected-apps'))).data;
 	}
+	let regUntil = $state('');
+	async function allowNewApp() {
+		try {
+			regUntil = (await ok(api.POST('/me/connected-apps/registration'))).expires_at;
+		} catch (e) {
+			app.toast(err(e), 'error');
+		}
+	}
 	async function disconnectApp(id: string) {
 		try {
 			await ok(api.DELETE('/me/connected-apps/{id}', { params: { path: { id } } }));
@@ -342,7 +350,12 @@
 		</section>
 		<section>
 			<h2>Connect Claude</h2>
-			<p class="muted">In Claude, open Settings → Connectors → Add custom connector and enter <code>{page.url.origin}/mcp</code>. You will sign in here, with your 2FA code, and approve it.</p>
+			<p class="muted">New apps can only register while you allow it, so nobody else can set one up for you to approve by mistake. 2FA must be on.</p>
+			<ol class="muted">
+				<li><button class="btn" onclick={allowNewApp} disabled={!app.me?.totp_enabled}>Allow a new app for 10 minutes</button>{#if regUntil} Open until {new Date(regUntil).toLocaleTimeString()}.{/if}</li>
+				<li>In Claude: Settings → Connectors → Add custom connector → <code>{page.url.origin}/mcp</code>.</li>
+				<li>Sign in here with your password and 2FA code, check the app name, and choose Allow.</li>
+			</ol>
 		</section>
 	{:else if tab === 'data'}
 		<section>

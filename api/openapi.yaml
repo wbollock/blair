@@ -454,6 +454,27 @@ paths:
                 required: [data]
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/ConnectedApp" } }
+  /me/connected-apps/registration:
+    post:
+      tags: [Account]
+      operationId: openAppRegistration
+      summary: Allow one new app to register for 10 minutes
+      description: |
+        Apps register themselves when you add them in Claude. Registration is closed otherwise, so a
+        stranger cannot create an app for you to approve by mistake. Needs a browser session and 2FA.
+        Call this, then add the connector in Claude within ten minutes.
+      responses:
+        "200":
+          description: Registration is open
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [expires_at]
+                properties:
+                  expires_at: { type: string, format: date-time }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /me/connected-apps/{id}:
     parameters: [{ $ref: "#/components/parameters/ID" }]
     delete:
@@ -1134,7 +1155,7 @@ paths:
       tags: [Plans]
       operationId: setPlan
       summary: Replace a day's plan (the order of task_ids is kept)
-      x-scopes: [tasks:write]
+      x-scopes: [tasks:write, tasks:delete]
       requestBody:
         required: true
         content:

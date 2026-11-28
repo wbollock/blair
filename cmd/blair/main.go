@@ -227,6 +227,7 @@ func serve() error {
 		BaseURL:        cfg.BaseURL,
 		MCPEnabled:     cfg.MCPEnabled,
 		OAuthRedirects: cfg.OAuthRedirects,
+		MCPCIDRs:       cfg.MCPCIDRs,
 	})
 
 	srv := &http.Server{

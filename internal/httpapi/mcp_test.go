@@ -8,12 +8,15 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wbollock/blair/api"
+	"github.com/wbollock/blair/internal/auth"
 	"github.com/wbollock/blair/internal/service"
 )
 
@@ -24,9 +27,32 @@ const (
 
 var formFields = regexp.MustCompile(`name="(req|csrf)" value="([^"]+)"`)
 
+// mcpUser is an admin with 2FA on, which connecting an app requires.
+type mcpUser struct {
+	b      *client
+	secret string
+}
+
+func (h *harness) mcpAdmin() *mcpUser {
+	h.t.Helper()
+	b := h.signedInAdmin()
+	setup := b.do("POST", "/api/v1/me/2fa/totp", nil)
+	expect(h.t, setup, 200)
+	code, _ := auth.TOTPCodeAt(setup.str("secret"), h.now)
+	expect(h.t, b.do("POST", "/api/v1/me/2fa/totp/confirm", map[string]any{"code": code}), 200)
+	return &mcpUser{b: b, secret: setup.str("secret")}
+}
+
+func (u *mcpUser) code(h *harness) string {
+	h.now = h.now.Add(31 * time.Second) // a code cannot be used twice
+	c, _ := auth.TOTPCodeAt(u.secret, h.now)
+	return c
+}
+
 // connectMCP runs the real OAuth flow (register, sign in, consent, token) and returns the token response.
-func connectMCP(t *testing.T, h *harness, scope string) map[string]any {
+func connectMCP(t *testing.T, h *harness, u *mcpUser, scope string) map[string]any {
 	t.Helper()
+	expect(t, u.b.do("POST", "/api/v1/me/connected-apps/registration", nil), 200)
 	post := func(path string, body any) (int, map[string]any) {
 		raw, _ := json.Marshal(body)
 		res, err := http.Post(h.srv.URL+path, "application/json", bytes.NewReader(raw))
@@ -73,6 +99,7 @@ func connectMCP(t *testing.T, h *harness, scope string) map[string]any {
 	}
 	res, err := c.Get(h.srv.URL + "/oauth/authorize?" + q.Encode())
 	res = step(res, err, "login", url.Values{"email": {"will@example.com"}, "password": {pw}})
+	res = step(res, nil, "mfa", url.Values{"code": {u.code(h)}})
 	res = step(res, nil, "approve", nil)
 	loc, _ := url.Parse(res.Header.Get("Location"))
 	code := loc.Query().Get("code")
@@ -117,8 +144,9 @@ func rpc(t *testing.T, h *harness, bearer, method string, params any) (int, map[
 
 func TestMCPEndToEnd(t *testing.T) {
 	h := newHarnessWith(t, service.Options{Registration: "closed"}, true)
-	b := h.signedInAdmin()
-	tok := connectMCP(t, h, "")
+	u := h.mcpAdmin()
+	b := u.b
+	tok := connectMCP(t, h, u, "")
 	access := tok["access_token"].(string)
 
 	// Discovery documents point at each other.
@@ -165,8 +193,9 @@ func TestMCPEndToEnd(t *testing.T) {
 // particular on every DELETE route.
 func TestMCPTokensAreRefusedByTheRESTAPI(t *testing.T) {
 	h := newHarnessWith(t, service.Options{Registration: "closed"}, true)
-	b := h.signedInAdmin()
-	tok := connectMCP(t, h, "")
+	u := h.mcpAdmin()
+	b := u.b
+	tok := connectMCP(t, h, u, "")
 	made := b.do("POST", "/api/v1/tasks", map[string]any{"title": "keep me"})
 	expect(t, made, 201)
 
@@ -204,9 +233,10 @@ func TestMCPTokensAreRefusedByTheRESTAPI(t *testing.T) {
 
 func TestMCPCannotDeleteAndHonoursReadOnlyGrant(t *testing.T) {
 	h := newHarnessWith(t, service.Options{Registration: "closed"}, true)
-	b := h.signedInAdmin()
+	u := h.mcpAdmin()
+	b := u.b
 	made := b.do("POST", "/api/v1/tasks", map[string]any{"title": "precious"})
-	tok := connectMCP(t, h, "tasks:read")
+	tok := connectMCP(t, h, u, "tasks:read")
 	access := tok["access_token"].(string)
 	if tok["scope"] != "tasks:read" {
 		t.Fatalf("scope: %v", tok["scope"])
@@ -224,8 +254,9 @@ func TestMCPCannotDeleteAndHonoursReadOnlyGrant(t *testing.T) {
 
 func TestConnectedAppsRevokeCutsOffMCP(t *testing.T) {
 	h := newHarnessWith(t, service.Options{Registration: "closed"}, true)
-	b := h.signedInAdmin()
-	tok := connectMCP(t, h, "")
+	u := h.mcpAdmin()
+	b := u.b
+	tok := connectMCP(t, h, u, "")
 	access := tok["access_token"].(string)
 
 	apps := b.do("GET", "/api/v1/me/connected-apps", nil)
@@ -266,7 +297,50 @@ func TestMCPIsOffByDefault(t *testing.T) {
 			t.Errorf("%s %s with BLAIR_MCP_ENABLED off: %d, want 404", c.method, c.path, res.StatusCode)
 		}
 	}
-	b := h.signedInAdmin()
+	u := h.mcpAdmin()
+	b := u.b
 	r := b.do("GET", "/api/v1/me/connected-apps", nil)
 	expect(t, r, 200)
+}
+
+func TestRegistrationEndpointNeedsA2FASession(t *testing.T) {
+	h := newHarnessWith(t, service.Options{Registration: "closed"}, true)
+	b := h.signedInAdmin() // no 2FA yet
+	expect(t, b.do("POST", "/api/v1/me/connected-apps/registration", nil), 403)
+	tok := h.token(b.do("POST", "/api/v1/me/tokens", map[string]any{"name": "t", "scopes": []string{"tasks:write"}}).str("token"))
+	expect(t, tok.do("POST", "/api/v1/me/connected-apps/registration", nil), 403) // tokens never open registration
+
+	// Without an open window the connector cannot register at all.
+	post, _ := http.Post(h.srv.URL+"/oauth/register", "application/json", strings.NewReader(`{"redirect_uris":["`+mcpCallback+`"]}`))
+	if post.StatusCode != 403 {
+		t.Fatalf("register without a window: %d", post.StatusCode)
+	}
+}
+
+// With an address list, the connector's endpoints refuse everyone else; the sign-in page stays open.
+func TestMCPAddressAllowList(t *testing.T) {
+	h := newHarnessCfg(t, service.Options{Registration: "closed"}, true, func(c *Config) {
+		c.MCPCIDRs = []netip.Prefix{netip.MustParsePrefix("160.79.104.0/21")}
+	})
+	srv := h.srv
+	for _, c := range []struct{ method, path string }{{"POST", "/mcp"}, {"POST", "/oauth/token"}, {"POST", "/oauth/register"}, {"POST", "/oauth/revoke"}, {"GET", "/.well-known/oauth-authorization-server"}} {
+		req, _ := http.NewRequest(c.method, srv.URL+c.path, strings.NewReader("{}"))
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != 403 {
+			t.Errorf("%s %s from outside the list: %d, want 403", c.method, c.path, res.StatusCode)
+		}
+	}
+	res, _ := http.Get(srv.URL + "/oauth/authorize")
+	if res.StatusCode == 403 {
+		t.Error("the sign-in page must stay reachable from a browser anywhere")
+	}
+	req, _ := http.NewRequest("POST", srv.URL+"/mcp", strings.NewReader("{}"))
+	req.Header.Set("X-Forwarded-For", "160.79.104.9")
+	if res, _ := http.DefaultClient.Do(req); res.StatusCode != 401 { // reaches the auth check
+		t.Errorf("an address inside the list: %d, want 401", res.StatusCode)
+	}
 }

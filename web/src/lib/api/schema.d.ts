@@ -302,6 +302,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me/connected-apps/registration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Allow one new app to register for 10 minutes
+         * @description Apps register themselves when you add them in Claude. Registration is closed otherwise, so a
+         *     stranger cannot create an app for you to approve by mistake. Needs a browser session and 2FA.
+         *     Call this, then add the connector in Claude within ten minutes.
+         */
+        post: operations["openAppRegistration"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/me/connected-apps/{id}": {
         parameters: {
             query?: never;
@@ -2149,6 +2171,31 @@ export interface operations {
                     };
                 };
             };
+        };
+    };
+    openAppRegistration: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Registration is open */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: date-time */
+                        expires_at: string;
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     revokeConnectedApp: {

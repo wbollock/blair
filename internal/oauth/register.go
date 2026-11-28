@@ -90,19 +90,19 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var n int
-	if err := s.db.R.QueryRowContext(r.Context(), `SELECT count(*) FROM oauth_clients`).Scan(&n); err != nil || n >= maxClients {
-		oauthError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "registration is full; try again later")
+	owner, ok := s.takeWindow(r.Context())
+	if !ok {
+		oauthError(w, http.StatusForbidden, "access_denied", "registration is closed: open it in Blair under Settings, Connected apps, then add the connector again")
 		return
 	}
 	id := "blair_c_" + random(32)
 	name := cleanName(in.ClientName)
-	if _, err := s.db.W.ExecContext(r.Context(), `INSERT INTO oauth_clients (id, name, redirect_uris, created_at) VALUES (?,?,?,?)`,
-		id, name, strings.Join(in.RedirectURIs, " "), s.nowStr()); err != nil {
+	if _, err := s.db.W.ExecContext(r.Context(), `INSERT INTO oauth_clients (id, owner_id, name, redirect_uris, created_at) VALUES (?,?,?,?,?)`,
+		id, owner, name, strings.Join(in.RedirectURIs, " "), s.nowStr()); err != nil {
 		oauthError(w, http.StatusInternalServerError, "server_error", "could not register")
 		return
 	}
-	s.audit(r, "", "oauth.client_registered", map[string]any{"client_id": id})
+	s.audit(r, owner, "oauth.client_registered", map[string]any{"client_id": id})
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"client_id":                  id,

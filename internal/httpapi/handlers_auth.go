@@ -426,6 +426,26 @@ func (a *API) listConnectedApps(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": out})
 }
 
+// openRegistration lets one app register itself for ten minutes (ADR-0016).
+func (a *API) openRegistration(w http.ResponseWriter, r *http.Request) {
+	u := userFrom(r.Context())
+	if a.oauth == nil || !a.cfg.MCPEnabled {
+		writeProblem(w, r, http.StatusNotFound, "not_found", "Not found", "the MCP connector is not enabled")
+		return
+	}
+	if !u.TOTPEnabled {
+		writeProblem(w, r, http.StatusForbidden, "2fa_required", "Two-factor authentication required", "turn on 2FA before connecting apps")
+		return
+	}
+	exp, err := a.oauth.OpenRegistration(r.Context(), u.ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	a.svc.Audit(r.Context(), u.ID, "oauth.registration_opened", clientInfo(r), nil)
+	writeJSON(w, http.StatusOK, map[string]any{"expires_at": exp.UTC().Format("2006-01-02T15:04:05Z")})
+}
+
 func (a *API) deleteConnectedApp(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r.Context())
 	if a.oauth == nil {

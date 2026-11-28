@@ -16,7 +16,8 @@ labels. A leaked or misbehaving write token should not be able to destroy data.
 - New PAT scope `tasks:delete`. The routes that delete task data now need it
   instead of `tasks:write`: `DELETE /projects/{id}`, `/columns/{id}`,
   `/tasks/{id}`, `/checklist/{id}`, `/labels/{id}` and
-  `/plans/{date}/tasks/{id}`.
+  `/plans/{date}/tasks/{id}`. `PUT /plans/{date}` replaces a whole plan and can drop
+  entries, so it needs `tasks:write` and `tasks:delete`.
 - `POST /batch` accepts `delete` ops. Those ops (except for notes, which keep
   `notes:write`) also need `tasks:delete`, or the new scope would be a no-op.
 - Migration `00005` adds `tasks:delete` to every existing token that has

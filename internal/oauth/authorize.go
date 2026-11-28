@@ -303,23 +303,25 @@ func (s *Server) stepLogin(w http.ResponseWriter, r *http.Request, f *flow, c *c
 		return
 	}
 	switch {
+	case u.ID != c.OwnerID:
+		// Only the account that opened registration may approve this app.
+		s.audit(r, u.ID, "oauth.owner_mismatch", map[string]any{"client_id": c.ID})
+		s.redo(w, r, f, c, "login", "This connection was started from a different account.", http.StatusForbidden)
+		return
 	case u.MustChangePassword:
 		s.redo(w, r, f, c, "login", "Sign in to Blair and change your password first.", http.StatusForbidden)
 		return
-	case s.svc.Options().Require2FA && !u.TOTPEnabled:
-		s.redo(w, r, f, c, "login", "Turn on two-factor authentication in Blair first.", http.StatusForbidden)
+	case !u.TOTPEnabled:
+		// Connected apps keep working for 30 days, so a password alone is not enough to create one.
+		s.redo(w, r, f, c, "login", "Turn on two-factor authentication in Blair before connecting apps.", http.StatusForbidden)
 		return
 	}
-	next := "consent"
-	if u.TOTPEnabled {
-		next = "mfa"
-	}
-	csrf, err := s.advance(r, f, next, u.ID)
+	csrf, err := s.advance(r, f, "mfa", u.ID)
 	if err != nil {
 		s.errorPage(w, http.StatusInternalServerError, "Something went wrong", "Try again from the app.")
 		return
 	}
-	s.render(w, r, f, c, next, csrf, u.ID, "")
+	s.render(w, r, f, c, "mfa", csrf, u.ID, "")
 }
 
 // render shows the form for stage (mfa or consent).

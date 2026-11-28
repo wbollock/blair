@@ -32,8 +32,9 @@ type Config struct {
 	OpenAPIYAML    []byte
 	OpenAPIJSON    []byte
 	BaseURL        *url.URL
-	MCPEnabled     bool     // mount /mcp and /oauth (ADR-0016)
-	OAuthRedirects []string // extra OAuth callbacks for local testing
+	MCPEnabled     bool           // mount /mcp and /oauth (ADR-0016)
+	OAuthRedirects []string       // extra OAuth callbacks for local testing
+	MCPCIDRs       []netip.Prefix // optional: only these addresses may use /mcp, /oauth/token, /register, /revoke and the discovery documents
 }
 
 type API struct {
@@ -81,14 +82,19 @@ func New(svc *service.Service, db *store.DB, cfg Config) http.Handler {
 	r.Get("/api/docs", a.docs)
 
 	if cfg.MCPEnabled && a.oauth != nil {
-		a.oauth.Routes(r)
+		// The sign-in pages must work from your own browser; everything the connector itself
+		// calls can be limited to Anthropic's addresses.
+		r.Group(func(r chi.Router) {
+			r.Use(cidrGate(cfg.MCPCIDRs, func(r *http.Request) bool { return r.URL.Path == "/oauth/authorize" }))
+			a.oauth.Routes(r)
+		})
 		origins := slices.Clone(mcpsrv.DefaultAllowedOrigins)
 		for _, ru := range cfg.OAuthRedirects {
 			if u, err := url.Parse(ru); err == nil {
 				origins = append(origins, u.Scheme+"://"+u.Host)
 			}
 		}
-		r.Handle("/mcp", mcpsrv.Handler(svc, a.oauth, mcpsrv.Config{Version: cfg.Version, MetadataURL: a.oauth.MetadataURL(),
+		r.With(cidrGate(cfg.MCPCIDRs, nil)).Handle("/mcp", mcpsrv.Handler(svc, a.oauth, mcpsrv.Config{Version: cfg.Version, MetadataURL: a.oauth.MetadataURL(),
 			AllowedOrigins: origins, ClientIP: func(r *http.Request) string { return clientIP(r.Context()) }}))
 	}
 
@@ -133,6 +139,7 @@ func New(svc *service.Service, db *store.DB, cfg Config) http.Handler {
 				r.Post("/me/tokens", a.createToken)
 				r.Delete("/me/tokens/{id}", a.deleteToken)
 				r.Get("/me/connected-apps", a.listConnectedApps)
+				r.Post("/me/connected-apps/registration", a.openRegistration)
 				r.Delete("/me/connected-apps/{id}", a.deleteConnectedApp)
 				r.Get("/me/audit", a.listAudit)
 				r.Post("/me/notifications/read", a.readNotifications)
@@ -177,7 +184,7 @@ func New(svc *service.Service, db *store.DB, cfg Config) http.Handler {
 
 			r.With(read).Get("/plans/slipping", a.slipping)
 			r.With(read).Get("/plans/{date}", a.getPlan)
-			r.With(write).Put("/plans/{date}", a.putPlan)
+			r.With(write, del).Put("/plans/{date}", a.putPlan) // a full replace can drop plan entries
 			r.With(write).Post("/plans/{date}/tasks", a.addToPlan)
 			r.With(del).Delete("/plans/{date}/tasks/{id}", a.removeFromPlan)
 

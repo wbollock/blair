@@ -45,7 +45,9 @@ const (
 	prefixAccess  = "blair_oat_"
 	prefixRefresh = "blair_ort_"
 	prefixCode    = "blair_oac_"
-	maxClients    = 200
+	maxGrants     = 10 // live connections per account; the oldest is revoked past this
+	windowTTL     = 10 * time.Minute
+	windowUses    = 3
 )
 
 // Config is what the server needs from the app config.
@@ -231,6 +233,7 @@ func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
 
 type client struct {
 	ID           string
+	OwnerID      string
 	Name         string
 	RedirectURIs []string
 }
@@ -238,7 +241,7 @@ type client struct {
 func (s *Server) client(ctx context.Context, id string) (*client, error) {
 	var c client
 	var uris string
-	err := s.db.R.QueryRowContext(ctx, `SELECT id, name, redirect_uris FROM oauth_clients WHERE id = ?`, id).Scan(&c.ID, &c.Name, &uris)
+	err := s.db.R.QueryRowContext(ctx, `SELECT id, owner_id, name, redirect_uris FROM oauth_clients WHERE id = ?`, id).Scan(&c.ID, &c.OwnerID, &c.Name, &uris)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrNotFound
 	}
@@ -267,3 +270,40 @@ func (s *Server) revokeGrant(ctx context.Context, grantID, reason string) error 
 }
 
 func newID() string { return uuid.Must(uuid.NewV7()).String() }
+
+// OpenRegistration lets one app register itself for the next few minutes. Registration is
+// otherwise refused, so a stranger cannot create a client that the owner might later approve.
+func (s *Server) OpenRegistration(ctx context.Context, userID string) (time.Time, error) {
+	exp := s.now().Add(windowTTL)
+	_, err := s.db.W.ExecContext(ctx, `INSERT INTO oauth_windows (user_id, expires_at, remaining) VALUES (?,?,?)
+		ON CONFLICT(user_id) DO UPDATE SET expires_at = excluded.expires_at, remaining = excluded.remaining`, userID, store.FormatTime(exp), windowUses)
+	return exp, err
+}
+
+// takeWindow consumes one registration from an open window and returns whose it was.
+func (s *Server) takeWindow(ctx context.Context) (string, bool) {
+	var uid string
+	err := s.db.W.QueryRowContext(ctx, `UPDATE oauth_windows SET remaining = remaining - 1
+		WHERE user_id = (SELECT user_id FROM oauth_windows WHERE remaining > 0 AND expires_at > ? ORDER BY expires_at LIMIT 1)
+		RETURNING user_id`, s.nowStr()).Scan(&uid)
+	return uid, err == nil
+}
+
+// trimGrants keeps an account to maxGrants live connections by revoking the oldest.
+func (s *Server) trimGrants(ctx context.Context, userID string) {
+	rows, err := s.db.W.QueryContext(ctx, `SELECT id FROM oauth_grants WHERE user_id = ? AND revoked_at IS NULL ORDER BY created_at DESC LIMIT -1 OFFSET ?`, userID, maxGrants)
+	if err != nil {
+		return
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	for _, id := range ids {
+		_ = s.revokeGrant(ctx, id, "too_many_connections")
+	}
+}

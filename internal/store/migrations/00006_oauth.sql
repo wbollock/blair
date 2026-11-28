@@ -5,9 +5,18 @@
 -- Public clients registered with RFC 7591 (Dynamic Client Registration).
 CREATE TABLE oauth_clients (
     id             TEXT PRIMARY KEY,
+    owner_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, -- the account that opened registration; only it can approve this client
     name           TEXT NOT NULL,
     redirect_uris  TEXT NOT NULL,      -- space separated, exact match
     created_at     TEXT NOT NULL
+);
+
+-- Registration is closed unless the owner opens a short window in Settings → Connected apps.
+-- This stops anyone else from registering a client and tricking the owner into approving it.
+CREATE TABLE oauth_windows (
+    user_id     TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    expires_at  TEXT NOT NULL,
+    remaining   INTEGER NOT NULL
 );
 
 -- One in-progress /oauth/authorize flow: login, then 2FA, then consent.
@@ -73,3 +82,4 @@ DROP TABLE oauth_codes;
 DROP TABLE oauth_grants;
 DROP TABLE oauth_requests;
 DROP TABLE oauth_clients;
+DROP TABLE oauth_windows;
