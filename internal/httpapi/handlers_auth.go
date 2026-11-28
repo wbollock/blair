@@ -2,13 +2,16 @@ package httpapi
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/wbollock/blair/internal/service"
+	"github.com/wbollock/blair/internal/telemetry"
 )
 
 func (a *API) setCookie(w http.ResponseWriter, name, value string, maxAge int) {
@@ -443,6 +446,8 @@ func (a *API) openRegistration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.svc.Audit(r.Context(), u.ID, "oauth.registration_opened", clientInfo(r), nil)
+	slog.InfoContext(r.Context(), "oauth event", "event", "oauth.registration_opened", "user_id", u.ID)
+	telemetry.Count(r.Context(), "blair.oauth.events", attribute.String("event", "registration_opened"))
 	writeJSON(w, http.StatusOK, map[string]any{"expires_at": exp.UTC().Format("2006-01-02T15:04:05Z")})
 }
 
@@ -458,6 +463,8 @@ func (a *API) deleteConnectedApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.svc.Audit(r.Context(), u.ID, "oauth.revoke", clientInfo(r), map[string]any{"grant_id": id, "by": "user"})
+	slog.InfoContext(r.Context(), "oauth event", "event", "oauth.revoke", "user_id", u.ID, "grant_id", id)
+	telemetry.Count(r.Context(), "blair.oauth.events", attribute.String("event", "revoke"))
 	w.WriteHeader(http.StatusNoContent)
 }
 

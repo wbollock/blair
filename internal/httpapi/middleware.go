@@ -19,6 +19,7 @@ import (
 	"github.com/wbollock/blair/internal/oauth"
 	"github.com/wbollock/blair/internal/ratelimit"
 	"github.com/wbollock/blair/internal/service"
+	"github.com/wbollock/blair/internal/telemetry"
 )
 
 type ctxKey int
@@ -332,6 +333,8 @@ func cidrGate(prefixes []netip.Prefix, exempt func(*http.Request) bool) func(htt
 					}
 				}
 			}
+			slog.WarnContext(r.Context(), "connector address gate refused a request", "ip", clientIP(r.Context()), "route", routePattern(r))
+			telemetry.Count(r.Context(), "blair.mcp.requests", attribute.String("outcome", "address_denied"))
 			writeProblem(w, r, http.StatusForbidden, "forbidden", "Forbidden", "")
 		})
 	}

@@ -92,6 +92,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 
 	owner, ok := s.takeWindow(r.Context())
 	if !ok {
+		s.audit(r, "", "oauth.registration_denied", nil)
 		oauthError(w, http.StatusForbidden, "access_denied", "registration is closed: open it in Blair under Settings, Connected apps, then add the connector again")
 		return
 	}

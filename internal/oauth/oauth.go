@@ -12,6 +12,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"slices"
@@ -21,11 +22,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/wbollock/blair/internal/auth"
 	"github.com/wbollock/blair/internal/ratelimit"
 	"github.com/wbollock/blair/internal/service"
 	"github.com/wbollock/blair/internal/store"
+	"github.com/wbollock/blair/internal/telemetry"
 )
 
 // Scopes an OAuth client can be granted. tasks:delete is never grantable (ADR-0015).
@@ -182,8 +185,33 @@ func subsetScope(sub, of string) bool {
 	return true
 }
 
+// suspicious events are logged at WARN with the client address, so they can be alerted on.
+var suspicious = map[string]bool{
+	"oauth.login_failure": true, "oauth.mfa_failure": true, "oauth.refresh_reuse": true, "oauth.code_reuse": true,
+	"oauth.owner_mismatch": true, "oauth.registration_denied": true,
+}
+
+// audit records a security event three ways: the user's audit log, a structured log line and a
+// counter. None of them carries a token, code, password, or task text.
 func (s *Server) audit(r *http.Request, userID, kind string, detail map[string]any) {
-	s.svc.Audit(r.Context(), userID, kind, service.ClientInfo{IP: s.cfg.ClientIP(r), UserAgent: r.UserAgent()}, detail)
+	ip := s.cfg.ClientIP(r)
+	s.svc.Audit(r.Context(), userID, kind, service.ClientInfo{IP: ip, UserAgent: r.UserAgent()}, detail)
+	attrs := []any{"event", kind}
+	if id, ok := detail["client_id"].(string); ok {
+		attrs = append(attrs, "client_id", id)
+	}
+	if id, ok := detail["grant_id"].(string); ok {
+		attrs = append(attrs, "grant_id", id)
+	}
+	if userID != "" {
+		attrs = append(attrs, "user_id", userID)
+	}
+	if suspicious[kind] {
+		slog.WarnContext(r.Context(), "oauth security event", append(attrs, "ip", ip)...)
+	} else {
+		slog.InfoContext(r.Context(), "oauth event", attrs...)
+	}
+	telemetry.Count(r.Context(), "blair.oauth.events", attribute.String("event", strings.TrimPrefix(kind, "oauth.")))
 }
 
 func (s *Server) allowedRedirect(uri string) bool { return slices.Contains(s.cfg.RedirectURIs, uri) }

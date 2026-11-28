@@ -16,10 +16,12 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/wbollock/blair/internal/oauth"
 	"github.com/wbollock/blair/internal/ratelimit"
 	"github.com/wbollock/blair/internal/service"
+	"github.com/wbollock/blair/internal/telemetry"
 )
 
 // Verifier resolves a bearer token to who it speaks for.
@@ -82,6 +84,12 @@ func Handler(svc *service.Service, ver Verifier, cfg Config) http.Handler {
 	return s.authenticate(http.MaxBytesHandler(sdk, 256<<10))
 }
 
+// reject counts and logs a refused /mcp request. The address is logged so that probing shows up.
+func (s *server) reject(r *http.Request, outcome string) {
+	telemetry.Count(r.Context(), "blair.mcp.requests", attribute.String("outcome", outcome))
+	slog.WarnContext(r.Context(), "mcp request refused", "outcome", outcome, "ip", s.cfg.ClientIP(r))
+}
+
 func (s *server) unauthorized(w http.ResponseWriter, errCode string) {
 	h := `Bearer resource_metadata="` + s.cfg.MetadataURL + `", scope="` + strings.Join(oauth.Scopes, " ") + `"`
 	if errCode != "" {
@@ -96,11 +104,13 @@ func (s *server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// DNS-rebinding and drive-by protection: a browser page from another origin may not call us.
 		if o := r.Header.Get("Origin"); o != "" && !slices.Contains(s.cfg.AllowedOrigins, o) {
+			s.reject(r, "origin_denied")
 			http.Error(w, "origin not allowed", http.StatusForbidden)
 			return
 		}
 		// Failed attempts are limited per address; working traffic only per grant.
 		reject := func(code string) {
+			s.reject(r, "unauthorized")
 			if ok, wait := s.ipLimit.Allow(s.cfg.ClientIP(r)); !ok {
 				w.Header().Set("Retry-After", fmt.Sprint(int(wait.Seconds())+1))
 				http.Error(w, "too many requests", http.StatusTooManyRequests)
@@ -123,15 +133,18 @@ func (s *server) authenticate(next http.Handler) http.Handler {
 			return
 		}
 		if !hasAny(p.Scopes, oauth.Scopes) {
+			s.reject(r, "insufficient_scope")
 			w.Header().Set("WWW-Authenticate", `Bearer error="insufficient_scope", scope="`+strings.Join(oauth.Scopes, " ")+`", resource_metadata="`+s.cfg.MetadataURL+`"`)
 			http.Error(w, "insufficient scope", http.StatusForbidden)
 			return
 		}
 		if ok, wait := s.reqLimit.Allow(p.GrantID); !ok {
+			s.reject(r, "rate_limited")
 			w.Header().Set("Retry-After", fmt.Sprint(int(wait.Seconds())+1))
 			http.Error(w, "too many requests", http.StatusTooManyRequests)
 			return
 		}
+		telemetry.Count(r.Context(), "blair.mcp.requests", attribute.String("outcome", "ok"))
 		ctx := context.WithValue(context.WithValue(r.Context(), ctxKey{}, p), reqKey{}, r)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -201,12 +214,19 @@ func register[In, Out any](s *server, m *mcp.Server, t *mcp.Tool, scope string, 
 		}
 		if write {
 			if ok, wait := s.writeLimit.Allow(p.GrantID); !ok {
+				telemetry.Count(ctx, "blair.mcp.tool.calls", attribute.String("tool", t.Name), attribute.String("outcome", "rate_limited"))
 				return nil, zero, fmt.Errorf("too many changes in a short time; wait %d seconds", int(wait.Seconds())+1)
 			}
 		}
 		start := time.Now()
 		out, id, err := fn(ctx, p.User, in)
-		slog.InfoContext(ctx, "mcp tool", "tool", t.Name, "write", write, "ok", err == nil, "duration_ms", time.Since(start).Milliseconds())
+		outcome := "ok"
+		if err != nil {
+			outcome = "error"
+		}
+		telemetry.Count(ctx, "blair.mcp.tool.calls", attribute.String("tool", t.Name), attribute.String("outcome", outcome))
+		telemetry.ObserveMs(ctx, "blair.mcp.tool.duration", float64(time.Since(start).Microseconds())/1000, attribute.String("tool", t.Name))
+		slog.InfoContext(ctx, "mcp tool", "tool", t.Name, "write", write, "ok", err == nil, "duration_ms", time.Since(start).Milliseconds(), "user_id", p.User.ID, "grant_id", p.GrantID)
 		if write && err == nil {
 			// Audit trail without content: which tool, which grant, which task.
 			hr := requestOf(ctx)

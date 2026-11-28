@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
 	"net/netip"
@@ -342,5 +343,38 @@ func TestMCPAddressAllowList(t *testing.T) {
 	req.Header.Set("X-Forwarded-For", "160.79.104.9")
 	if res, _ := http.DefaultClient.Do(req); res.StatusCode != 401 { // reaches the auth check
 		t.Errorf("an address inside the list: %d, want 401", res.StatusCode)
+	}
+}
+
+// Logs, audit rows and metrics must never carry tokens, codes, passwords or task text.
+func TestMCPAndOAuthLogsCarryNoSecretsOrContent(t *testing.T) {
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer slog.SetDefault(old)
+
+	h := newHarnessWith(t, service.Options{Registration: "closed"}, true)
+	u := h.mcpAdmin()
+	tok := connectMCP(t, h, u, "")
+	access, refresh := tok["access_token"].(string), tok["refresh_token"].(string)
+	rpc(t, h, access, "tools/call", map[string]any{"name": "create_task", "arguments": map[string]any{"title": "secret-title-xyz", "description": "secret-body-xyz"}})
+	rpc(t, h, "blair_oat_wrongwrongwrongwrongwrongwrongwrongwrongwrong", "tools/list", nil)
+	// A replayed refresh token is the event most worth alerting on; it must be visible but not leak.
+	cid := tok["client_id"].(string)
+	for range 2 {
+		resp, _ := http.PostForm(h.srv.URL+"/oauth/token", url.Values{"grant_type": {"refresh_token"}, "client_id": {cid}, "refresh_token": {refresh}})
+		resp.Body.Close()
+	}
+
+	out := buf.String()
+	for _, secret := range []string{access, refresh, "blair_oat_", "blair_ort_", "blair_oac_", pw, "secret-title-xyz", "secret-body-xyz", u.secret, "wrongwrong"} {
+		if strings.Contains(out, secret) {
+			t.Fatalf("log output contains %q", secret)
+		}
+	}
+	for _, want := range []string{`"msg":"oauth security event"`, `"event":"oauth.refresh_reuse"`, `"msg":"mcp tool"`, `"msg":"mcp request refused"`, `"outcome":"unauthorized"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected log line missing: %s", want)
+		}
 	}
 }
