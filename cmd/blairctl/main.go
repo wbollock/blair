@@ -16,7 +16,11 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode"
 )
+
+// pageSize is the most tasks the API returns per request.
+var pageSize = 1000
 
 const usage = `usage: blairctl <command> [flags]
 
@@ -192,12 +196,35 @@ type task struct {
 	DueDate  *string `json:"due_date"`
 }
 
-func printTask(out io.Writer, t task) {
+// clean replaces control characters so that names from the API cannot move
+// the cursor or spoof other output in a terminal.
+func clean(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return unicode.ReplacementChar
+		}
+		return r
+	}, s)
+}
+
+// asciiFold lowercases ASCII letters only, matching how the server compares
+// names.
+func asciiFold(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'A' && r <= 'Z' {
+			return r + 'a' - 'A'
+		}
+		return r
+	}, strings.TrimSpace(s))
+}
+
+func printTask(out io.Writer, t task) error {
 	due := ""
 	if t.DueDate != nil {
 		due = *t.DueDate
 	}
-	fmt.Fprintf(out, "%s\t%s\tp%d\t%s\t%s\n", t.ID, t.Status, t.Priority, due, t.Title)
+	_, err := fmt.Fprintf(out, "%s\t%s\tp%d\t%s\t%s\n", t.ID, t.Status, t.Priority, due, clean(t.Title))
+	return err
 }
 
 func (c *client) projectList(args []string, out io.Writer) error {
@@ -229,7 +256,9 @@ func (c *client) projectList(args []string, out io.Writer) error {
 		for i, col := range p.Columns {
 			cols[i] = col.Name
 		}
-		fmt.Fprintf(out, "%s\t%s\t%s\n", p.ID, p.Name, strings.Join(cols, ", "))
+		if _, err := fmt.Fprintf(out, "%s\t%s\t%s\n", p.ID, clean(p.Name), clean(strings.Join(cols, ", "))); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -253,7 +282,7 @@ func (c *client) projectID(name string) (string, error) {
 	}
 	archivedID := ""
 	for _, p := range res.Data {
-		if !strings.EqualFold(p.Name, name) {
+		if asciiFold(p.Name) != asciiFold(name) {
 			continue
 		}
 		if p.ArchivedAt == nil {
@@ -278,7 +307,7 @@ func (c *client) taskList(args []string, out io.Writer) error {
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	q := url.Values{"status": {*status}, "limit": {fmt.Sprint(*limit)}}
+	q := url.Values{"status": {*status}}
 	if *search != "" {
 		q.Set("q", *search)
 	}
@@ -289,27 +318,65 @@ func (c *client) taskList(args []string, out io.Writer) error {
 		}
 		q.Set("project_id", id)
 	}
-	raw, err := c.do("GET", "/tasks", q, nil)
+	tasks, raws, err := c.fetchTasks(q, *limit)
 	if err != nil {
 		return err
 	}
 	if *asJSON {
-		return printJSON(out, raw, false)
+		b, err := json.Marshal(map[string]any{"data": raws})
+		if err != nil {
+			return err
+		}
+		return printJSON(out, b, false)
 	}
-	var res struct {
-		Data []task `json:"data"`
-	}
-	if err := json.Unmarshal(raw, &res); err != nil {
-		return err
-	}
-	for _, t := range res.Data {
-		printTask(out, t)
+	for _, t := range tasks {
+		if err := printTask(out, t); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
+// fetchTasks follows next_cursor until it has limit tasks or the API has no
+// more. It returns the tasks and their raw JSON.
+func (c *client) fetchTasks(q url.Values, limit int) ([]task, []json.RawMessage, error) {
+	var tasks []task
+	var raws []json.RawMessage
+	cursor := ""
+	for len(tasks) < limit {
+		q.Set("limit", fmt.Sprint(min(limit-len(tasks), pageSize)))
+		if cursor != "" {
+			q.Set("cursor", cursor)
+		}
+		raw, err := c.do("GET", "/tasks", q, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		var page struct {
+			Data       []json.RawMessage `json:"data"`
+			NextCursor *string           `json:"next_cursor"`
+		}
+		if err := json.Unmarshal(raw, &page); err != nil {
+			return nil, nil, err
+		}
+		for _, r := range page.Data {
+			var t task
+			if err := json.Unmarshal(r, &t); err != nil {
+				return nil, nil, err
+			}
+			tasks = append(tasks, t)
+			raws = append(raws, r)
+		}
+		if page.NextCursor == nil || *page.NextCursor == "" {
+			break
+		}
+		cursor = *page.NextCursor
+	}
+	return tasks, raws, nil
+}
+
 func (c *client) taskGet(args []string, out io.Writer) error {
-	fs, _ := newFlagSet("task get")
+	fs, asJSON := newFlagSet("task get")
 	pos, err := parseFlags(fs, args)
 	if err != nil {
 		return err
@@ -321,7 +388,7 @@ func (c *client) taskGet(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return printJSON(out, raw, true)
+	return printJSON(out, raw, !*asJSON)
 }
 
 // taskFields are the flags shared by task add and task edit.
@@ -451,6 +518,5 @@ func printTaskResult(out io.Writer, raw []byte, asJSON bool) error {
 	if err := json.Unmarshal(raw, &t); err != nil {
 		return err
 	}
-	printTask(out, t)
-	return nil
+	return printTask(out, t)
 }

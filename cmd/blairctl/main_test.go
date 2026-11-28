@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http/httptest"
 	"net/netip"
 	"strings"
@@ -191,5 +193,71 @@ func TestQuickAddResolvesColumnInSelectedProject(t *testing.T) {
 	}
 	if created.Title != "Fix gutter" || created.Status != "doing" {
 		t.Fatalf("created = %+v", created)
+	}
+}
+
+func TestProjectNameMatchesServerRules(t *testing.T) {
+	s := startServer(t)
+	ctx := context.Background()
+	for _, name := range []string{"équipe", "Équipe"} {
+		if _, err := s.svc.CreateProject(ctx, s.user, service.ProjectCreate{Name: name}); err != nil {
+			t.Fatal(err)
+		}
+		runOK(t, s.env, "task", "add", "in "+name, "-project", name)
+	}
+	list := runOK(t, s.env, "task", "list", "-project", "Équipe")
+	if !strings.Contains(list, "in Équipe") || strings.Contains(list, "in équipe") {
+		t.Fatalf("wrong project selected:\n%s", list)
+	}
+}
+
+func TestControlCharactersAreNotPrinted(t *testing.T) {
+	env := startServer(t).env
+	runOK(t, env, "task", "add", "red\x1b[31mtext")
+	if list := runOK(t, env, "task", "list"); strings.ContainsRune(list, 0x1b) {
+		t.Fatalf("escape character reached the terminal: %q", list)
+	}
+}
+
+func TestTaskListFollowsPages(t *testing.T) {
+	old := pageSize
+	pageSize = 2
+	t.Cleanup(func() { pageSize = old })
+	env := startServer(t).env
+	for i := 0; i < 5; i++ {
+		runOK(t, env, "task", "add", fmt.Sprintf("task %d", i))
+	}
+	if n := strings.Count(runOK(t, env, "task", "list", "-limit", "5"), "\n"); n != 5 {
+		t.Fatalf("listed %d tasks, want 5", n)
+	}
+	if n := strings.Count(runOK(t, env, "task", "list", "-limit", "3"), "\n"); n != 3 {
+		t.Fatalf("listed %d tasks with -limit 3", n)
+	}
+}
+
+func TestTaskGetJSONIsOneLine(t *testing.T) {
+	env := startServer(t).env
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(runOK(t, env, "task", "add", "one", "-json")), &created); err != nil {
+		t.Fatal(err)
+	}
+	if out := runOK(t, env, "task", "get", created.ID, "-json"); strings.Count(strings.TrimSpace(out), "\n") != 0 {
+		t.Fatalf("raw JSON spans several lines:\n%s", out)
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("disk full") }
+
+func TestOutputWriteErrorsAreReported(t *testing.T) {
+	env := startServer(t).env
+	if err := run([]string{"task", "add", "x"}, env, failingWriter{}); err == nil {
+		t.Fatal("task add ignored a write error")
+	}
+	if err := run([]string{"task", "list"}, env, failingWriter{}); err == nil {
+		t.Fatal("task list ignored a write error")
 	}
 }
