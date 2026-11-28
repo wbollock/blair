@@ -960,7 +960,7 @@ surprise reloads mid-typing).
 | `BLAIR_REGISTRATION` | `closed` | `closed` \| `invite` \| `open` |
 | `BLAIR_REQUIRE_2FA` | `false` | Force 2FA enrollment |
 | `BLAIR_MCP_ENABLED` | `false` | Serve `/mcp` and `/oauth/*` (§9.5.1). Needs an https `BLAIR_BASE_URL` |
-| `BLAIR_MCP_ALLOWED_CIDRS` | — | Optional. Only these addresses may call `/mcp`, `/oauth/token`, `/oauth/register`, `/oauth/revoke` and the discovery documents |
+| `BLAIR_MCP_ALLOWED_CIDRS` (or `blair serve --mcp-allowed-cidrs LIST`) | — | Optional, off by default; the flag wins over the variable and an empty flag removes the limit. Only these addresses may call `/mcp`, `/oauth/token`, `/oauth/register`, `/oauth/revoke` and the discovery documents |
 | `BLAIR_OAUTH_EXTRA_REDIRECT_URIS` | — | Extra OAuth callbacks, comma separated. For local testing (for example MCP Inspector); leave unset in production |
 | `BLAIR_TRUSTED_PROXIES` | `127.0.0.1/32,::1/128` | For client IP |
 | `BLAIR_BACKUP_INTERVAL` / `BLAIR_BACKUP_KEEP` | `24h` / `14` | Built-in `VACUUM INTO` backups to `$DATA_DIR/backups` |

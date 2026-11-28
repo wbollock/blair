@@ -37,7 +37,7 @@ it a way to destroy data or to reach the rest of the API.
 - **2FA is required** to approve an app, because an app keeps working for 30 days. At most 10
   apps per account (the oldest is revoked). Changing or resetting the password, or turning 2FA
   off or resetting it, disconnects every app.
-- **Optional address list.** `BLAIR_MCP_ALLOWED_CIDRS` limits `/mcp`, `/oauth/token`,
+- **Optional address list, off by default.** `BLAIR_MCP_ALLOWED_CIDRS`, or `blair serve --mcp-allowed-cidrs LIST` (the flag wins), limits `/mcp`, `/oauth/token`,
   `/oauth/register`, `/oauth/revoke` and the discovery documents to given addresses. The
   sign-in page stays open. There is no built-in list: Anthropic publishes its outbound ranges
   (`160.79.104.0/21` and `153.61.208.0/20` when last read, 2026-11-28; see its IP addresses page) and

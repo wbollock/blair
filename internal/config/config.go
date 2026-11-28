@@ -83,15 +83,8 @@ func Load() (*Config, error) {
 	if c.MCPEnabled && u.Scheme != "https" && u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1" {
 		return nil, fmt.Errorf("BLAIR_MCP_ENABLED needs an https BLAIR_BASE_URL, got %q", base)
 	}
-	for _, v := range strings.Split(os.Getenv("BLAIR_MCP_ALLOWED_CIDRS"), ",") {
-		if v = strings.TrimSpace(v); v == "" {
-			continue
-		}
-		pfx, err := netip.ParsePrefix(v)
-		if err != nil {
-			return nil, fmt.Errorf("BLAIR_MCP_ALLOWED_CIDRS: %w", err)
-		}
-		c.MCPCIDRs = append(c.MCPCIDRs, pfx)
+	if c.MCPCIDRs, err = ParseCIDRs(os.Getenv("BLAIR_MCP_ALLOWED_CIDRS")); err != nil {
+		return nil, fmt.Errorf("BLAIR_MCP_ALLOWED_CIDRS: %w", err)
 	}
 	for _, v := range strings.Split(os.Getenv("BLAIR_OAUTH_EXTRA_REDIRECT_URIS"), ",") {
 		v = strings.TrimSpace(v)
@@ -131,6 +124,22 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("BLAIR_BACKUP_KEEP must be a positive integer")
 	}
 	return c, nil
+}
+
+// ParseCIDRs parses a comma-separated list of prefixes. Empty input means no restriction.
+func ParseCIDRs(text string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, v := range strings.Split(text, ",") {
+		if v = strings.TrimSpace(v); v == "" {
+			continue
+		}
+		pfx, err := netip.ParsePrefix(v)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, pfx.Masked())
+	}
+	return out, nil
 }
 
 func parseBool(key string, def bool) (bool, error) {
