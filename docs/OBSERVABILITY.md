@@ -33,5 +33,5 @@ revoked); a burst of `login_failure`, `mfa_failure` or `unauthorized`; any `owne
 `oauth.registration_opened`, `oauth.client_registered`, `oauth.authorize`, `oauth.authorize_denied`,
 `oauth.login_failure`, `oauth.mfa_failure`, `oauth.owner_mismatch`, `oauth.token_issued`,
 `oauth.token_refreshed`, `oauth.refresh_reuse`, `oauth.code_reuse`, `oauth.revoke`, and `mcp.write`
-(tool, grant, task id). Connecting an app and a refresh-token reuse also create an in-app
-notification. Reads through `/mcp` are counted and logged but not stored per call.
+(tool, grant, task id). An app registering under your account, an app being connected, and a refresh-token reuse each also
+create an in-app notification. Reads through `/mcp` are counted and logged but not stored per call.

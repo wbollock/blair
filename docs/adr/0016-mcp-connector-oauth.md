@@ -57,12 +57,21 @@ it a way to destroy data or to reach the rest of the API.
   logged by tool name only.
 
 ## Consequences
-- **Residual: registration cannot prove whose it is.** Dynamic registration is unauthenticated, so
-  during your ten-minute window a stranger who happened to register first would get a client
-  bound to your account. They still need you to approve it with your password and 2FA, the
-  consent page names the app (unverified), the window has one use, and the client goes stale
-  in ten minutes. That is mitigation, not proof; no proof is available because the client is
-  claude.ai's server, not your browser. Open the window only just before adding the connector.
+- **Residual: registration cannot be bound to the owner's sign-in.** This was examined and there
+  is no sound way to do it with dynamic registration. The registering party is claude.ai's
+  server; the owner's browser is a different party, and nothing exists at registration time that
+  both of them hold. The only later link is the `client_id` in the authorize URL, which is
+  exactly what a stranger could have registered. Cookies, IP addresses and the callback URL do not
+  separate the two cases (both arrive the same way). So during your ten-minute window a stranger
+  who registered first would get a client bound to your account. What limits that: the window has
+  one use and ten minutes, registration is refused if two accounts have one open, a client that was
+  never approved goes stale in ten minutes, approval needs your password and 2FA on a consent page
+  that names the app (unverified), and you get an in-app notification whenever an app registers
+  under your account, so a registration you did not make is visible. Open the window only just
+  before adding the connector. The only complete fix is to stop using dynamic registration: create
+  the client yourself in Settings and give Claude its client id. That is not built, and whether the
+  Claude connector form accepts a client id without a secret has not been confirmed.
+
 - Anything a task contains is read by the model. A title such as "ignore
   previous instructions" is data, and the server instructions say so, but a
   model can still be fooled. The worst a fooled model can do is create, edit,

@@ -612,8 +612,8 @@ custom connector at `https://<host>/mcp`.
   `oauth.token_refreshed`, `oauth.refresh_reuse`, `oauth.code_reuse`,
   `oauth.revoke`, `oauth.login_failure`, `oauth.mfa_failure`, and `mcp.write`
   (tool name, grant, task id; never titles or text). Metrics, logs and alerts are in
-  [OBSERVABILITY.md](OBSERVABILITY.md). Connecting an app and a
-  refresh-token reuse also raise a notification.
+  [OBSERVABILITY.md](OBSERVABILITY.md). An app registering, an app
+  being connected and a refresh-token reuse also raise a notification.
 - **Settings → Connected apps** lists grants and revokes them
   (`GET /me/connected-apps`, `DELETE /me/connected-apps/{id}`; browser session
   only). Revoking works even when the feature is switched off.

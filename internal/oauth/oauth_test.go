@@ -1065,3 +1065,16 @@ func TestConsentRacingRevocationNeverLeavesAWorkingGrant(t *testing.T) {
 		}
 	}
 }
+
+// A registration under your account is visible to you: an in-app notification, and an audit row.
+func TestRegistrationNotifiesTheOwner(t *testing.T) {
+	e := newEnv(t)
+	e.register(callback)
+	var n int
+	if err := e.db.R.QueryRow(`SELECT count(*) FROM notifications WHERE owner_id = ? AND kind = 'security.oauth.client_registered'`, e.user.ID).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("notifications: %d (%v), want 1", n, err)
+	}
+	if err := e.db.R.QueryRow(`SELECT count(*) FROM audit_events WHERE user_id = ? AND kind = 'oauth.client_registered'`, e.user.ID).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("audit rows: %d (%v), want 1", n, err)
+	}
+}
