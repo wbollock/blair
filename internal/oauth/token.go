@@ -210,6 +210,12 @@ func (s *Server) refresh(r *http.Request, c *client) (*tokenResponse, error) {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	// The revoked check above ran before this transaction. Repeat it inside, where it cannot
+	// interleave with a revocation, so a grant cut off a moment ago does not get a new pair.
+	var stillRevoked sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT revoked_at FROM oauth_grants WHERE id = ?`, gid).Scan(&stillRevoked); err != nil || stillRevoked.Valid {
+		return nil, invalidGrant("the refresh token is not valid")
+	}
 	res, err := tx.ExecContext(ctx, `UPDATE oauth_tokens SET used_at = ? WHERE token_hash = ? AND used_at IS NULL`, s.nowStr(), hash(tok))
 	if err != nil {
 		return nil, err
