@@ -7,11 +7,15 @@ import (
 	"io/fs"
 	"net/http"
 	"net/netip"
+	"net/url"
+	"slices"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"github.com/wbollock/blair/internal/mcpsrv"
+	"github.com/wbollock/blair/internal/oauth"
 	"github.com/wbollock/blair/internal/service"
 	"github.com/wbollock/blair/internal/store"
 )
@@ -27,6 +31,9 @@ type Config struct {
 	Web            fs.FS // built SPA; nil serves a placeholder
 	OpenAPIYAML    []byte
 	OpenAPIJSON    []byte
+	BaseURL        *url.URL
+	MCPEnabled     bool     // mount /mcp and /oauth (ADR-0016)
+	OAuthRedirects []string // extra OAuth callbacks for local testing
 }
 
 type API struct {
@@ -39,6 +46,7 @@ type API struct {
 	loginIPLimit    *limiter
 	loginEmailLimit *limiter
 	apiLimit        *limiter
+	oauth           *oauth.Server // nil when BaseURL is unset; always present so grants can be revoked
 }
 
 // New builds the full HTTP handler.
@@ -54,6 +62,11 @@ func New(svc *service.Service, db *store.DB, cfg Config) http.Handler {
 	if cfg.Secure {
 		a.cookieName, a.preName = "__Host-blair_session", "__Host-blair_preauth"
 	}
+	if cfg.BaseURL != nil {
+		redirects := append(slices.Clone(oauth.DefaultRedirectURIs), cfg.OAuthRedirects...)
+		a.oauth = oauth.New(db, svc, oauth.Config{BaseURL: cfg.BaseURL, Secure: cfg.Secure, RedirectURIs: redirects,
+			ClientIP: func(r *http.Request) string { return clientIP(r.Context()) }})
+	}
 
 	r := chi.NewRouter()
 	r.Use(realIP(cfg.TrustedProxies), securityHeaders(cfg.HSTS), observe)
@@ -66,6 +79,28 @@ func New(svc *service.Service, db *store.DB, cfg Config) http.Handler {
 	r.Get("/api/openapi.yaml", a.openapi("application/yaml", cfg.OpenAPIYAML))
 	r.Get("/api/openapi.json", a.openapi("application/json", cfg.OpenAPIJSON))
 	r.Get("/api/docs", a.docs)
+
+	if cfg.MCPEnabled && a.oauth != nil {
+		a.oauth.Routes(r)
+		origins := slices.Clone(mcpsrv.DefaultAllowedOrigins)
+		for _, ru := range cfg.OAuthRedirects {
+			if u, err := url.Parse(ru); err == nil {
+				origins = append(origins, u.Scheme+"://"+u.Host)
+			}
+		}
+		r.Handle("/mcp", mcpsrv.Handler(svc, a.oauth, mcpsrv.Config{Version: cfg.Version, MetadataURL: a.oauth.MetadataURL(),
+			AllowedOrigins: origins, ClientIP: func(r *http.Request) string { return clientIP(r.Context()) }}))
+	}
+
+	if !cfg.MCPEnabled {
+		// Off by default: say so instead of letting the SPA fallback answer.
+		off := func(w http.ResponseWriter, r *http.Request) {
+			writeProblem(w, r, http.StatusNotFound, "not_found", "Not found", "the MCP connector is not enabled")
+		}
+		r.HandleFunc("/mcp", off)
+		r.HandleFunc("/oauth/*", off)
+		r.HandleFunc("/.well-known/oauth-*", off)
+	}
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(noStore, bodyLimit(1<<20))
@@ -97,6 +132,8 @@ func New(svc *service.Service, db *store.DB, cfg Config) http.Handler {
 				r.Get("/me/tokens", a.listTokens)
 				r.Post("/me/tokens", a.createToken)
 				r.Delete("/me/tokens/{id}", a.deleteToken)
+				r.Get("/me/connected-apps", a.listConnectedApps)
+				r.Delete("/me/connected-apps/{id}", a.deleteConnectedApp)
 				r.Get("/me/audit", a.listAudit)
 				r.Post("/me/notifications/read", a.readNotifications)
 			})

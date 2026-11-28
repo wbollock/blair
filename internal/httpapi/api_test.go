@@ -9,6 +9,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -34,6 +35,12 @@ type harness struct {
 
 func newHarness(t *testing.T, opts service.Options) *harness {
 	t.Helper()
+	return newHarnessWith(t, opts, false)
+}
+
+// newHarnessWith can serve the MCP connector; it needs the server's own URL as the issuer.
+func newHarnessWith(t *testing.T, opts service.Options, mcp bool) *harness {
+	t.Helper()
 	db, err := store.Open(context.Background(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -44,8 +51,14 @@ func newHarness(t *testing.T, opts service.Options) *harness {
 	h := &harness{t: t, svc: svc, now: time.Now()}
 	svc.SetClock(func() time.Time { return h.now })
 	jsonDoc, _ := api.JSON()
-	handler := New(svc, db, Config{TrustedProxies: []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}, OpenAPIYAML: api.YAML, OpenAPIJSON: jsonDoc, Version: "test"})
-	h.srv = httptest.NewServer(handler)
+	h.srv = httptest.NewUnstartedServer(nil)
+	cfg := Config{TrustedProxies: []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}, OpenAPIYAML: api.YAML, OpenAPIJSON: jsonDoc, Version: "test"}
+	if mcp {
+		cfg.BaseURL, _ = url.Parse("http://" + h.srv.Listener.Addr().String())
+		cfg.MCPEnabled = true
+	}
+	h.srv.Config.Handler = New(svc, db, cfg)
+	h.srv.Start()
 	t.Cleanup(h.srv.Close)
 
 	doc, err := api.Load()

@@ -123,7 +123,7 @@ func (s *Server) Routes(r chi.Router) {
 	r.Post("/oauth/register", s.register)
 	r.Options("/oauth/register", s.preflight)
 	r.Get("/oauth/authorize", s.authorizeGet)
-	r.Post("/oauth/authorize", s.authorizePost)
+	r.With(http.NewCrossOriginProtection().Handler).Post("/oauth/authorize", s.authorizePost)
 	r.Post("/oauth/token", s.token)
 	r.Options("/oauth/token", s.preflight)
 	r.Post("/oauth/revoke", s.revoke)

@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/wbollock/blair/internal/oauth"
 	"github.com/wbollock/blair/internal/ratelimit"
 	"github.com/wbollock/blair/internal/service"
 )
@@ -198,6 +199,11 @@ func (a *API) authenticate(next http.Handler) http.Handler {
 			tok, ok := strings.CutPrefix(h, "Bearer ")
 			if !ok {
 				writeProblem(w, r, http.StatusUnauthorized, "unauthorized", "Unauthorized", "use Authorization: Bearer <token>")
+				return
+			}
+			if oauth.IsOAuthToken(strings.TrimSpace(tok)) {
+				// OAuth tokens are bound to /mcp (ADR-0016) and never work on the REST API.
+				writeProblem(w, r, http.StatusForbidden, "oauth_token_not_accepted", "OAuth token not accepted here", "this token is only valid at /mcp")
 				return
 			}
 			u, scopes, err := a.svc.LookupToken(ctx, strings.TrimSpace(tok))

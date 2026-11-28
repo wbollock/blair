@@ -33,6 +33,8 @@ type Config struct {
 	MetricsToken   string
 	DebugAddr      string
 	SecureCookies  bool
+	MCPEnabled     bool     // serve /mcp and /oauth (ADR-0016)
+	OAuthRedirects []string // extra OAuth callbacks, for local testing only
 }
 
 func env(key, def string) string {
@@ -73,6 +75,24 @@ func Load() (*Config, error) {
 	}
 	if c.Prometheus, perr = parseBool("BLAIR_PROMETHEUS", false); perr != nil {
 		return nil, perr
+	}
+	if c.MCPEnabled, perr = parseBool("BLAIR_MCP_ENABLED", false); perr != nil {
+		return nil, perr
+	}
+	if c.MCPEnabled && u.Scheme != "https" && u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1" {
+		return nil, fmt.Errorf("BLAIR_MCP_ENABLED needs an https BLAIR_BASE_URL, got %q", base)
+	}
+	for _, v := range strings.Split(os.Getenv("BLAIR_OAUTH_EXTRA_REDIRECT_URIS"), ",") {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		ru, err := url.Parse(v)
+		loopback := err == nil && ru.Scheme == "http" && (ru.Hostname() == "localhost" || ru.Hostname() == "127.0.0.1")
+		if err != nil || ru.Host == "" || ru.Fragment != "" || (ru.Scheme != "https" && !loopback) {
+			return nil, fmt.Errorf("BLAIR_OAUTH_EXTRA_REDIRECT_URIS: %q must be https or an http loopback URL", v)
+		}
+		c.OAuthRedirects = append(c.OAuthRedirects, v)
 	}
 	if c.DebugAddr != "" {
 		ap, err := netip.ParseAddrPort(c.DebugAddr)

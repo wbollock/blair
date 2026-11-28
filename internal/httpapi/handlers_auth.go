@@ -413,6 +413,34 @@ func (a *API) deleteToken(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (a *API) listConnectedApps(w http.ResponseWriter, r *http.Request) {
+	if a.oauth == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"data": []any{}})
+		return
+	}
+	out, err := a.oauth.ListGrants(r.Context(), userFrom(r.Context()).ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+func (a *API) deleteConnectedApp(w http.ResponseWriter, r *http.Request) {
+	u := userFrom(r.Context())
+	if a.oauth == nil {
+		writeError(w, r, service.ErrNotFound)
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if err := a.oauth.RevokeGrant(r.Context(), u.ID, id); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	a.svc.Audit(r.Context(), u.ID, "oauth.revoke", clientInfo(r), map[string]any{"grant_id": id, "by": "user"})
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (a *API) listAudit(w http.ResponseWriter, r *http.Request) {
 	out, err := a.svc.ListAudit(r.Context(), userFrom(r.Context()).ID, 100)
 	if err != nil {

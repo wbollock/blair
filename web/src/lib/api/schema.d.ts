@@ -282,6 +282,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me/connected-apps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Apps connected through OAuth (the MCP connector)
+         * @description Browser session only. Each entry is one consent you gave; revoke it to cut the app off at once.
+         */
+        get: operations["listConnectedApps"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/connected-apps/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Disconnect an app (its access and refresh tokens stop working immediately) */
+        delete: operations["revokeConnectedApp"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/me/audit": {
         parameters: {
             query?: never;
@@ -1038,6 +1077,18 @@ export interface components {
             created_at: string;
             /** @description The secret. Only present in the create response. */
             token?: string;
+        };
+        ConnectedApp: {
+            /** Format: uuid */
+            id: string;
+            /** @description The name the app gave when it registered. Not verified. */
+            name: string;
+            /** @description Only tasks:read and tasks:write can be granted. */
+            scopes: components["schemas"]["Scope"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            last_used_at: string | null;
         };
         AuditEvent: {
             /** Format: uuid */
@@ -2069,6 +2120,49 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listConnectedApps: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Connected apps, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ConnectedApp"][];
+                    };
+                };
+            };
+        };
+    };
+    revokeConnectedApp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Disconnected */
             204: {
                 headers: {
                     [name: string]: unknown;

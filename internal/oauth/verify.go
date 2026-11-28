@@ -100,3 +100,9 @@ func (s *Server) RevokeGrant(ctx context.Context, userID, id string) error {
 	}
 	return s.revokeGrant(ctx, id, "user")
 }
+
+// IsOAuthToken reports whether tok looks like an OAuth access or refresh token. The REST
+// API uses it to refuse them with a clear error instead of treating them as unknown PATs.
+func IsOAuthToken(tok string) bool {
+	return strings.HasPrefix(tok, prefixAccess) || strings.HasPrefix(tok, prefixRefresh)
+}

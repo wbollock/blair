@@ -438,6 +438,31 @@ paths:
       responses:
         "204": { description: Revoked }
         "404": { $ref: "#/components/responses/NotFound" }
+  /me/connected-apps:
+    get:
+      tags: [Account]
+      operationId: listConnectedApps
+      summary: Apps connected through OAuth (the MCP connector)
+      description: Browser session only. Each entry is one consent you gave; revoke it to cut the app off at once.
+      responses:
+        "200":
+          description: Connected apps, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/ConnectedApp" } }
+  /me/connected-apps/{id}:
+    parameters: [{ $ref: "#/components/parameters/ID" }]
+    delete:
+      tags: [Account]
+      operationId: revokeConnectedApp
+      summary: Disconnect an app (its access and refresh tokens stop working immediately)
+      responses:
+        "204": { description: Disconnected }
+        "404": { $ref: "#/components/responses/NotFound" }
   /me/audit:
     get:
       tags: [Account]
@@ -1587,6 +1612,15 @@ components:
         last_used_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
         token: { type: string, description: The secret. Only present in the create response. }
+    ConnectedApp:
+      type: object
+      required: [id, name, scopes, created_at, last_used_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, description: The name the app gave when it registered. Not verified. }
+        scopes: { type: array, items: { $ref: "#/components/schemas/Scope" }, description: Only tasks:read and tasks:write can be granted. }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time, nullable: true }
     AuditEvent:
       type: object
       required: [id, kind, ip, user_agent, detail, created_at]

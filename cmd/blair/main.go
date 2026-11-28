@@ -224,6 +224,9 @@ func serve() error {
 		Web:            web.FS(),
 		OpenAPIYAML:    api.YAML,
 		OpenAPIJSON:    openapiJSON,
+		BaseURL:        cfg.BaseURL,
+		MCPEnabled:     cfg.MCPEnabled,
+		OAuthRedirects: cfg.OAuthRedirects,
 	})
 
 	srv := &http.Server{
