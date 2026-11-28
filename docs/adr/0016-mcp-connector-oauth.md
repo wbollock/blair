@@ -57,6 +57,12 @@ it a way to destroy data or to reach the rest of the API.
   logged by tool name only.
 
 ## Consequences
+- **Residual: registration cannot prove whose it is.** Dynamic registration is unauthenticated, so
+  during your ten-minute window a stranger who happened to register first would get a client
+  bound to your account. They still need you to approve it with your password and 2FA, the
+  consent page names the app (unverified), the window has one use, and the client goes stale
+  in ten minutes. That is mitigation, not proof; no proof is available because the client is
+  claude.ai's server, not your browser. Open the window only just before adding the connector.
 - Anything a task contains is read by the model. A title such as "ignore
   previous instructions" is data, and the server instructions say so, but a
   model can still be fooled. The worst a fooled model can do is create, edit,

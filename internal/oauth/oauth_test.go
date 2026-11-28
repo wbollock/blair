@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -39,6 +40,8 @@ type env struct {
 }
 
 func newEnv(t *testing.T) *env { return newEnvWith(t, true) }
+
+func (e *env) nowStr() string { return store.FormatTime(e.now) }
 
 func newEnvWith(t *testing.T, withTOTP bool) *env {
 	t.Helper()
@@ -1004,5 +1007,61 @@ func TestApprovedClientSurvivesHousekeeping(t *testing.T) {
 	}
 	if res, _ := e.browser().Get(e.authorizeURL(never, nil)); res.StatusCode != 400 {
 		t.Fatalf("a never-approved client survived: %d", res.StatusCode)
+	}
+}
+
+// The race the review called critical: a consent submitted at the same moment as a password or 2FA
+// change must never leave a code that still works. Either the revocation runs first and the
+// consent finds its sign-in gone, or the consent runs first and the revocation deletes its code.
+func TestConsentRacingRevocationNeverLeavesAWorkingGrant(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	cid := e.register(callback)
+	for i := range 40 {
+		binding, csrf, id := random(43), random(43), random(32)
+		_, err := e.db.W.ExecContext(ctx, `INSERT INTO oauth_requests (id, client_id, redirect_uri, scope, state, code_challenge, resource, stage, user_id, binding_hash, csrf_hash, created_at, expires_at)
+			VALUES (?,?,?,?,?,?,?,'consent',?,?,?,?,?)`, id, cid, callback, "tasks:read tasks:write", "s", challengeOf(verifier), e.o.Resource(), e.user.ID,
+			hash(binding), hash(csrf), e.nowStr(), store.FormatTime(e.now.Add(time.Hour)))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var code string
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			req, _ := http.NewRequest("POST", e.srv.URL+"/oauth/authorize", strings.NewReader(url.Values{"req": {id}, "csrf": {csrf}, "action": {"approve"}}.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.AddCookie(&http.Cookie{Name: "blair_oauth", Value: binding})
+			res, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
+			if err != nil {
+				return
+			}
+			defer res.Body.Close()
+			if loc, err := url.Parse(res.Header.Get("Location")); err == nil {
+				code = loc.Query().Get("code")
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			if err := e.svc.RevokeOAuthGrants(ctx, e.user.ID, "test"); err != nil {
+				t.Error(err)
+			}
+		}()
+		close(start)
+		wg.Wait()
+
+		if code != "" {
+			if st, _ := e.exchange(cid, code, verifier); st == 200 {
+				t.Fatalf("iteration %d: a code issued while credentials changed was still redeemable", i)
+			}
+		}
+		if apps, _ := e.o.ListGrants(ctx, e.user.ID); len(apps) != 0 {
+			t.Fatalf("iteration %d: %d live grants after revocation", i, len(apps))
+		}
 	}
 }
