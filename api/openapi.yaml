@@ -570,7 +570,7 @@ paths:
       tags: [Projects]
       operationId: deleteProject
       summary: Delete a project and its tasks (notes are kept, unlinked)
-      x-scopes: [tasks:write]
+      x-scopes: [tasks:delete]
       responses:
         "204": { description: Deleted }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -624,7 +624,7 @@ paths:
       operationId: deleteColumn
       summary: Delete a column
       description: A column with tasks needs `move_tasks_to`. The last `todo` or `done` column can't be deleted (409).
-      x-scopes: [tasks:write]
+      x-scopes: [tasks:delete]
       parameters:
         - { name: move_tasks_to, in: query, schema: { type: string, format: uuid } }
       responses:
@@ -751,7 +751,7 @@ paths:
       tags: [Tasks]
       operationId: deleteTask
       summary: Move to trash (or delete forever with permanent=true)
-      x-scopes: [tasks:write]
+      x-scopes: [tasks:delete]
       parameters:
         - { name: permanent, in: query, schema: { type: boolean } }
       responses:
@@ -869,7 +869,7 @@ paths:
       tags: [Tasks]
       operationId: deleteChecklistItem
       summary: Delete a checklist item
-      x-scopes: [tasks:write]
+      x-scopes: [tasks:delete]
       responses:
         "204": { description: Deleted }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -940,7 +940,7 @@ paths:
       tags: [Labels]
       operationId: deleteLabel
       summary: Delete a label (removes it from tasks)
-      x-scopes: [tasks:write]
+      x-scopes: [tasks:delete]
       responses:
         "204": { description: Deleted }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -1160,7 +1160,7 @@ paths:
       tags: [Plans]
       operationId: removeFromPlan
       summary: Take a task out of a day's plan
-      x-scopes: [tasks:write]
+      x-scopes: [tasks:delete]
       responses:
         "204": { description: Removed }
   /search:
@@ -1474,7 +1474,7 @@ components:
       enum: [todo, doing, waiting, done, cancelled]
     Scope:
       type: string
-      enum: [tasks:read, tasks:write, notes:read, notes:write, export, account:read]
+      enum: [tasks:read, tasks:write, tasks:delete, notes:read, notes:write, export, account:read]
     Problem:
       type: object
       required: [type, title, status]

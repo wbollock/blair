@@ -10,14 +10,13 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-	"golang.org/x/time/rate"
 
+	"github.com/wbollock/blair/internal/ratelimit"
 	"github.com/wbollock/blair/internal/service"
 )
 
@@ -177,51 +176,9 @@ func noStore(next http.Handler) http.Handler {
 
 // ---- rate limiting ----
 
-type limiter struct {
-	mu      sync.Mutex
-	every   rate.Limit
-	burst   int
-	buckets map[string]*bucket
-}
+type limiter = ratelimit.Limiter
 
-type bucket struct {
-	l    *rate.Limiter
-	seen time.Time
-}
-
-func newLimiter(per time.Duration, n int) *limiter {
-	l := &limiter{every: rate.Every(per / time.Duration(n)), burst: n, buckets: map[string]*bucket{}}
-	go func() {
-		for range time.Tick(10 * time.Minute) {
-			l.mu.Lock()
-			for k, b := range l.buckets {
-				if time.Since(b.seen) > time.Hour {
-					delete(l.buckets, k)
-				}
-			}
-			l.mu.Unlock()
-		}
-	}()
-	return l
-}
-
-// allow consumes a token for key and returns the wait until the next one when refused.
-func (l *limiter) allow(key string) (bool, time.Duration) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	b, ok := l.buckets[key]
-	if !ok {
-		b = &bucket{l: rate.NewLimiter(l.every, l.burst)}
-		l.buckets[key] = b
-	}
-	b.seen = time.Now()
-	res := b.l.Reserve()
-	if d := res.Delay(); d > 0 {
-		res.Cancel()
-		return false, d
-	}
-	return true, 0
-}
+func newLimiter(per time.Duration, n int) *limiter { return ratelimit.New(per, n) }
 
 func tooMany(w http.ResponseWriter, r *http.Request, wait time.Duration) {
 	secs := int(wait.Seconds()) + 1
@@ -285,7 +242,7 @@ func (a *API) requireAuth(next http.Handler) http.Handler {
 			writeProblem(w, r, http.StatusUnauthorized, "unauthorized", "Unauthorized", "sign in or send a bearer token")
 			return
 		}
-		if ok, wait := a.apiLimit.allow(u.ID); !ok {
+		if ok, wait := a.apiLimit.Allow(u.ID); !ok {
 			tooMany(w, r, wait)
 			return
 		}

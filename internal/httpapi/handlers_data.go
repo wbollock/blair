@@ -475,6 +475,10 @@ func (a *API) batch(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusForbidden, "insufficient_scope", "Insufficient scope", "note ops need the notes:write scope")
 			return
 		}
+		if strings.EqualFold(op.Op, "delete") && op.Type != "note" && !hasScope(r, "tasks:delete") {
+			writeProblem(w, r, http.StatusForbidden, "insufficient_scope", "Insufficient scope", "delete ops need the tasks:delete scope")
+			return
+		}
 	}
 	u := userFrom(r.Context())
 	res, err := a.svc.Batch(r.Context(), u, in.Ops, r.URL.Query().Get("dry_run") == "true")

@@ -58,7 +58,7 @@ type setupRequest struct {
 }
 
 func (a *API) setup(w http.ResponseWriter, r *http.Request) {
-	if ok, wait := a.loginIPLimit.allow("setup:" + clientIP(r.Context())); !ok {
+	if ok, wait := a.loginIPLimit.Allow("setup:" + clientIP(r.Context())); !ok {
 		tooMany(w, r, wait)
 		return
 	}
@@ -90,7 +90,7 @@ type registerRequest struct {
 }
 
 func (a *API) register(w http.ResponseWriter, r *http.Request) {
-	if ok, wait := a.loginIPLimit.allow("register:" + clientIP(r.Context())); !ok {
+	if ok, wait := a.loginIPLimit.Allow("register:" + clientIP(r.Context())); !ok {
 		tooMany(w, r, wait)
 		return
 	}
@@ -132,11 +132,11 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	if ok, wait := a.loginIPLimit.allow("login:" + clientIP(r.Context())); !ok {
+	if ok, wait := a.loginIPLimit.Allow("login:" + clientIP(r.Context())); !ok {
 		tooMany(w, r, wait)
 		return
 	}
-	if ok, wait := a.loginEmailLimit.allow(strings.ToLower(strings.TrimSpace(in.Email))); !ok {
+	if ok, wait := a.loginEmailLimit.Allow(strings.ToLower(strings.TrimSpace(in.Email))); !ok {
 		tooMany(w, r, wait)
 		return
 	}
@@ -175,7 +175,7 @@ type mfaRequest struct {
 }
 
 func (a *API) loginMFA(w http.ResponseWriter, r *http.Request) {
-	if ok, wait := a.loginIPLimit.allow("mfa:" + clientIP(r.Context())); !ok {
+	if ok, wait := a.loginIPLimit.Allow("mfa:" + clientIP(r.Context())); !ok {
 		tooMany(w, r, wait)
 		return
 	}

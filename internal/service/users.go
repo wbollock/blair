@@ -27,7 +27,7 @@ const (
 )
 
 // Scopes for personal access tokens (SPEC §9.5).
-var Scopes = []string{"tasks:read", "tasks:write", "notes:read", "notes:write", "export", "account:read"}
+var Scopes = []string{"tasks:read", "tasks:write", "tasks:delete", "notes:read", "notes:write", "export", "account:read"}
 
 type User struct {
 	ID                 string          `json:"id"`

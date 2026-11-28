@@ -563,9 +563,10 @@ checklist. A security review against it is a Phase 9 exit criterion.
 - Personal access tokens with the format `blair_pat_<base62 32 bytes>` and a
   prefix for secret scanning. Shown once and stored hashed. Fields: name,
   scopes, optional expiry, last-used time.
-- Scopes: `tasks:read`, `tasks:write`, `notes:read`, `notes:write`,
-  `export`, `account:read`. Admin endpoints are **never** reachable
-  by token.
+- Scopes: `tasks:read`, `tasks:write`, `tasks:delete`, `notes:read`,
+  `notes:write`, `export`, `account:read`. Every route that deletes task data
+  (and `delete` ops in `POST /batch`) needs `tasks:delete`; see ADR-0015.
+  Admin endpoints are **never** reachable by token.
 - Sent as `Authorization: Bearer …`. Tokens are not accepted from query strings
   (except a separate, read-only `events` ticket for SSE: see §10.7).
 

@@ -110,7 +110,7 @@
 	let tokenName = $state('');
 	let tokenScopes = $state<Schemas['Scope'][]>(['tasks:read', 'tasks:write']);
 	let newToken = $state('');
-	const allScopes: Schemas['Scope'][] = ['tasks:read', 'tasks:write', 'notes:read', 'notes:write', 'export', 'account:read'];
+	const allScopes: Schemas['Scope'][] = ['tasks:read', 'tasks:write', 'tasks:delete', 'notes:read', 'notes:write', 'export', 'account:read'];
 	async function loadTokens() {
 		tokens = (await ok(api.GET('/me/tokens'))).data;
 	}
