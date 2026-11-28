@@ -2,13 +2,16 @@ package httpapi
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/wbollock/blair/internal/service"
+	"github.com/wbollock/blair/internal/telemetry"
 )
 
 func (a *API) setCookie(w http.ResponseWriter, name, value string, maxAge int) {
@@ -58,7 +61,7 @@ type setupRequest struct {
 }
 
 func (a *API) setup(w http.ResponseWriter, r *http.Request) {
-	if ok, wait := a.loginIPLimit.allow("setup:" + clientIP(r.Context())); !ok {
+	if ok, wait := a.loginIPLimit.Allow("setup:" + clientIP(r.Context())); !ok {
 		tooMany(w, r, wait)
 		return
 	}
@@ -90,7 +93,7 @@ type registerRequest struct {
 }
 
 func (a *API) register(w http.ResponseWriter, r *http.Request) {
-	if ok, wait := a.loginIPLimit.allow("register:" + clientIP(r.Context())); !ok {
+	if ok, wait := a.loginIPLimit.Allow("register:" + clientIP(r.Context())); !ok {
 		tooMany(w, r, wait)
 		return
 	}
@@ -132,11 +135,11 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	if ok, wait := a.loginIPLimit.allow("login:" + clientIP(r.Context())); !ok {
+	if ok, wait := a.loginIPLimit.Allow("login:" + clientIP(r.Context())); !ok {
 		tooMany(w, r, wait)
 		return
 	}
-	if ok, wait := a.loginEmailLimit.allow(strings.ToLower(strings.TrimSpace(in.Email))); !ok {
+	if ok, wait := a.loginEmailLimit.Allow(strings.ToLower(strings.TrimSpace(in.Email))); !ok {
 		tooMany(w, r, wait)
 		return
 	}
@@ -175,7 +178,7 @@ type mfaRequest struct {
 }
 
 func (a *API) loginMFA(w http.ResponseWriter, r *http.Request) {
-	if ok, wait := a.loginIPLimit.allow("mfa:" + clientIP(r.Context())); !ok {
+	if ok, wait := a.loginIPLimit.Allow("mfa:" + clientIP(r.Context())); !ok {
 		tooMany(w, r, wait)
 		return
 	}
@@ -410,6 +413,58 @@ func (a *API) deleteToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.svc.Audit(r.Context(), u.ID, "token.revoked", clientInfo(r), map[string]any{"token_id": id})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) listConnectedApps(w http.ResponseWriter, r *http.Request) {
+	if a.oauth == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"data": []any{}})
+		return
+	}
+	out, err := a.oauth.ListGrants(r.Context(), userFrom(r.Context()).ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+// openRegistration lets one app register itself for ten minutes (ADR-0016).
+func (a *API) openRegistration(w http.ResponseWriter, r *http.Request) {
+	u := userFrom(r.Context())
+	if a.oauth == nil || !a.cfg.MCPEnabled {
+		writeProblem(w, r, http.StatusNotFound, "not_found", "Not found", "the MCP connector is not enabled")
+		return
+	}
+	if !u.TOTPEnabled {
+		writeProblem(w, r, http.StatusForbidden, "2fa_required", "Two-factor authentication required", "turn on 2FA before connecting apps")
+		return
+	}
+	exp, err := a.oauth.OpenRegistration(r.Context(), u.ID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	a.svc.Audit(r.Context(), u.ID, "oauth.registration_opened", clientInfo(r), nil)
+	slog.InfoContext(r.Context(), "oauth event", "event", "oauth.registration_opened", "user_id", u.ID)
+	telemetry.Count(r.Context(), "blair.oauth.events", attribute.String("event", "registration_opened"))
+	writeJSON(w, http.StatusOK, map[string]any{"expires_at": exp.UTC().Format("2006-01-02T15:04:05Z")})
+}
+
+func (a *API) deleteConnectedApp(w http.ResponseWriter, r *http.Request) {
+	u := userFrom(r.Context())
+	if a.oauth == nil {
+		writeError(w, r, service.ErrNotFound)
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if err := a.oauth.RevokeGrant(r.Context(), u.ID, id); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	a.svc.Audit(r.Context(), u.ID, "oauth.revoke", clientInfo(r), map[string]any{"grant_id": id, "by": "user"})
+	slog.InfoContext(r.Context(), "oauth event", "event", "oauth.revoke", "user_id", u.ID, "grant_id", id)
+	telemetry.Count(r.Context(), "blair.oauth.events", attribute.String("event", "revoke"))
 	w.WriteHeader(http.StatusNoContent)
 }
 

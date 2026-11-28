@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -82,5 +83,48 @@ func TestScheduledBackupRetention(t *testing.T) {
 	}
 	if entries[0].Name() != "blair-20200103T000000Z.db" {
 		t.Fatalf("oldest kept = %s", entries[0].Name())
+	}
+}
+
+func TestTasksDeleteScopeMigration(t *testing.T) {
+	db, err := Open(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	raw, err := migrations.ReadFile("migrations/00005_tasks_delete_scope.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	up := strings.SplitN(strings.SplitN(string(raw), "-- +goose Up", 2)[1], "-- +goose Down", 2)[0]
+
+	if _, err := db.W.Exec(`INSERT INTO users (id, email, display_name, password_hash, created_at, updated_at) VALUES ('u1','a@b.c','a','x','t','t')`); err != nil {
+		t.Skipf("users insert needs more columns than this test knows: %v", err)
+	}
+	for id, scopes := range map[string]string{
+		"writer": "tasks:read tasks:write", "reader": "tasks:read", "notes": "notes:write",
+		"already": "tasks:write tasks:delete", "only": "tasks:write",
+	} {
+		if _, err := db.W.Exec(`INSERT INTO api_tokens (id, user_id, name, token_hash, prefix, scopes, created_at) VALUES (?, 'u1', ?, ?, 'p', ?, 't')`, id, id, []byte(id), scopes); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 2 { // idempotent
+		if _, err := db.W.Exec(up); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := map[string]string{
+		"writer": "tasks:read tasks:write tasks:delete", "reader": "tasks:read", "notes": "notes:write",
+		"already": "tasks:write tasks:delete", "only": "tasks:write tasks:delete",
+	}
+	for id, w := range want {
+		var got string
+		if err := db.W.QueryRow(`SELECT scopes FROM api_tokens WHERE id = ?`, id).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != w {
+			t.Errorf("%s: scopes = %q, want %q", id, got, w)
+		}
 	}
 }

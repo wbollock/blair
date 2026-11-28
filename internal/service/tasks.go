@@ -1132,3 +1132,11 @@ func (s *Service) ListTasks(ctx context.Context, u *User, f TaskFilter) (*TaskPa
 	}
 	return page, s.decorate(ctx, s.db.R, u, page.Data)
 }
+
+// CountOverdue counts the user's open tasks whose due date has passed, without loading them.
+func (s *Service) CountOverdue(ctx context.Context, u *User) (int, error) {
+	today := s.clock().In(u.Location()).Format("2006-01-02")
+	var n int
+	err := s.db.R.QueryRowContext(ctx, `SELECT count(*) FROM tasks WHERE owner_id = ? AND deleted_at IS NULL AND due_date < ? AND status NOT IN ('done','cancelled')`, u.ID, today).Scan(&n)
+	return n, err
+}

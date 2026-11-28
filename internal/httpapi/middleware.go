@@ -10,15 +10,16 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-	"golang.org/x/time/rate"
 
+	"github.com/wbollock/blair/internal/oauth"
+	"github.com/wbollock/blair/internal/ratelimit"
 	"github.com/wbollock/blair/internal/service"
+	"github.com/wbollock/blair/internal/telemetry"
 )
 
 type ctxKey int
@@ -177,51 +178,9 @@ func noStore(next http.Handler) http.Handler {
 
 // ---- rate limiting ----
 
-type limiter struct {
-	mu      sync.Mutex
-	every   rate.Limit
-	burst   int
-	buckets map[string]*bucket
-}
+type limiter = ratelimit.Limiter
 
-type bucket struct {
-	l    *rate.Limiter
-	seen time.Time
-}
-
-func newLimiter(per time.Duration, n int) *limiter {
-	l := &limiter{every: rate.Every(per / time.Duration(n)), burst: n, buckets: map[string]*bucket{}}
-	go func() {
-		for range time.Tick(10 * time.Minute) {
-			l.mu.Lock()
-			for k, b := range l.buckets {
-				if time.Since(b.seen) > time.Hour {
-					delete(l.buckets, k)
-				}
-			}
-			l.mu.Unlock()
-		}
-	}()
-	return l
-}
-
-// allow consumes a token for key and returns the wait until the next one when refused.
-func (l *limiter) allow(key string) (bool, time.Duration) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	b, ok := l.buckets[key]
-	if !ok {
-		b = &bucket{l: rate.NewLimiter(l.every, l.burst)}
-		l.buckets[key] = b
-	}
-	b.seen = time.Now()
-	res := b.l.Reserve()
-	if d := res.Delay(); d > 0 {
-		res.Cancel()
-		return false, d
-	}
-	return true, 0
-}
+func newLimiter(per time.Duration, n int) *limiter { return ratelimit.New(per, n) }
 
 func tooMany(w http.ResponseWriter, r *http.Request, wait time.Duration) {
 	secs := int(wait.Seconds()) + 1
@@ -241,6 +200,11 @@ func (a *API) authenticate(next http.Handler) http.Handler {
 			tok, ok := strings.CutPrefix(h, "Bearer ")
 			if !ok {
 				writeProblem(w, r, http.StatusUnauthorized, "unauthorized", "Unauthorized", "use Authorization: Bearer <token>")
+				return
+			}
+			if oauth.IsOAuthToken(strings.TrimSpace(tok)) {
+				// OAuth tokens are bound to /mcp (ADR-0016) and never work on the REST API.
+				writeProblem(w, r, http.StatusForbidden, "oauth_token_not_accepted", "OAuth token not accepted here", "this token is only valid at /mcp")
 				return
 			}
 			u, scopes, err := a.svc.LookupToken(ctx, strings.TrimSpace(tok))
@@ -285,7 +249,7 @@ func (a *API) requireAuth(next http.Handler) http.Handler {
 			writeProblem(w, r, http.StatusUnauthorized, "unauthorized", "Unauthorized", "sign in or send a bearer token")
 			return
 		}
-		if ok, wait := a.apiLimit.allow(u.ID); !ok {
+		if ok, wait := a.apiLimit.Allow(u.ID); !ok {
 			tooMany(w, r, wait)
 			return
 		}
@@ -347,4 +311,31 @@ func adminOnly(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	}))
+}
+
+// cidrGate answers 403 unless the client address is inside one of the prefixes. An empty list
+// allows everyone. exempt names requests that must stay open (the browser sign-in pages).
+func cidrGate(prefixes []netip.Prefix, exempt func(*http.Request) bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		if len(prefixes) == 0 {
+			return next
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if exempt != nil && exempt(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if ip, err := netip.ParseAddr(clientIP(r.Context())); err == nil {
+				for _, p := range prefixes {
+					if p.Contains(ip.Unmap()) {
+						next.ServeHTTP(w, r)
+						return
+					}
+				}
+			}
+			slog.WarnContext(r.Context(), "connector address gate refused a request", "ip", clientIP(r.Context()), "route", routePattern(r))
+			telemetry.Count(r.Context(), "blair.mcp.requests", attribute.String("outcome", "address_denied"))
+			writeProblem(w, r, http.StatusForbidden, "forbidden", "Forbidden", "")
+		})
+	}
 }

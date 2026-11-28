@@ -33,6 +33,9 @@ type Config struct {
 	MetricsToken   string
 	DebugAddr      string
 	SecureCookies  bool
+	MCPEnabled     bool           // serve /mcp and /oauth (ADR-0016)
+	OAuthRedirects []string       // extra OAuth callbacks, for local testing only
+	MCPCIDRs       []netip.Prefix // when set, /mcp and the OAuth data endpoints only answer these addresses
 }
 
 func env(key, def string) string {
@@ -74,6 +77,27 @@ func Load() (*Config, error) {
 	if c.Prometheus, perr = parseBool("BLAIR_PROMETHEUS", false); perr != nil {
 		return nil, perr
 	}
+	if c.MCPEnabled, perr = parseBool("BLAIR_MCP_ENABLED", false); perr != nil {
+		return nil, perr
+	}
+	if c.MCPEnabled && u.Scheme != "https" && u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1" {
+		return nil, fmt.Errorf("BLAIR_MCP_ENABLED needs an https BLAIR_BASE_URL, got %q", base)
+	}
+	if c.MCPCIDRs, err = ParseCIDRs(os.Getenv("BLAIR_MCP_ALLOWED_CIDRS")); err != nil {
+		return nil, fmt.Errorf("BLAIR_MCP_ALLOWED_CIDRS: %w", err)
+	}
+	for _, v := range strings.Split(os.Getenv("BLAIR_OAUTH_EXTRA_REDIRECT_URIS"), ",") {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		ru, err := url.Parse(v)
+		loopback := err == nil && ru.Scheme == "http" && (ru.Hostname() == "localhost" || ru.Hostname() == "127.0.0.1")
+		if err != nil || ru.Host == "" || ru.Fragment != "" || (ru.Scheme != "https" && !loopback) {
+			return nil, fmt.Errorf("BLAIR_OAUTH_EXTRA_REDIRECT_URIS: %q must be https or an http loopback URL", v)
+		}
+		c.OAuthRedirects = append(c.OAuthRedirects, v)
+	}
 	if c.DebugAddr != "" {
 		ap, err := netip.ParseAddrPort(c.DebugAddr)
 		if err != nil || !ap.Addr().IsLoopback() {
@@ -100,6 +124,22 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("BLAIR_BACKUP_KEEP must be a positive integer")
 	}
 	return c, nil
+}
+
+// ParseCIDRs parses a comma-separated list of prefixes. Empty input means no restriction.
+func ParseCIDRs(text string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, v := range strings.Split(text, ",") {
+		if v = strings.TrimSpace(v); v == "" {
+			continue
+		}
+		pfx, err := netip.ParsePrefix(v)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, pfx.Masked())
+	}
+	return out, nil
 }
 
 func parseBool(key string, def bool) (bool, error) {

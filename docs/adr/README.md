@@ -14,5 +14,7 @@
 - [ADR-0012](0012-lean-reminders-sync-offline.md): Lean reminders, sync and offline capture
 - [ADR-0013](0013-repeating-tasks.md): Repeating tasks roll forward in place
 - [ADR-0014](0014-daily-plan.md): An optional daily plan, kept as history
+- [ADR-0015](0015-tasks-delete-scope.md): Deleting needs its own scope, `tasks:delete`
+- [ADR-0016](0016-mcp-connector-oauth.md): A remote MCP connector with its own OAuth server
 
 New ADR: copy the shape of an existing one, take the next number, add it here.

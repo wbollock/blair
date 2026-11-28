@@ -438,6 +438,52 @@ paths:
       responses:
         "204": { description: Revoked }
         "404": { $ref: "#/components/responses/NotFound" }
+  /me/connected-apps:
+    get:
+      tags: [Account]
+      operationId: listConnectedApps
+      summary: Apps connected through OAuth (the MCP connector)
+      description: Browser session only. Each entry is one consent you gave; revoke it to cut the app off at once.
+      responses:
+        "200":
+          description: Connected apps, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/ConnectedApp" } }
+  /me/connected-apps/registration:
+    post:
+      tags: [Account]
+      operationId: openAppRegistration
+      summary: Allow one new app to register for 10 minutes
+      description: |
+        Apps register themselves when you add them in Claude. Registration is closed otherwise, so a
+        stranger cannot create an app for you to approve by mistake. Needs a browser session and 2FA.
+        Call this, then add the connector in Claude within ten minutes.
+      responses:
+        "200":
+          description: Registration is open
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [expires_at]
+                properties:
+                  expires_at: { type: string, format: date-time }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /me/connected-apps/{id}:
+    parameters: [{ $ref: "#/components/parameters/ID" }]
+    delete:
+      tags: [Account]
+      operationId: revokeConnectedApp
+      summary: Disconnect an app (its access and refresh tokens stop working immediately)
+      responses:
+        "204": { description: Disconnected }
+        "404": { $ref: "#/components/responses/NotFound" }
   /me/audit:
     get:
       tags: [Account]
@@ -570,7 +616,7 @@ paths:
       tags: [Projects]
       operationId: deleteProject
       summary: Delete a project and its tasks (notes are kept, unlinked)
-      x-scopes: [tasks:write]
+      x-scopes: [tasks:delete]
       responses:
         "204": { description: Deleted }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -624,7 +670,7 @@ paths:
       operationId: deleteColumn
       summary: Delete a column
       description: A column with tasks needs `move_tasks_to`. The last `todo` or `done` column can't be deleted (409).
-      x-scopes: [tasks:write]
+      x-scopes: [tasks:delete]
       parameters:
         - { name: move_tasks_to, in: query, schema: { type: string, format: uuid } }
       responses:
@@ -751,7 +797,7 @@ paths:
       tags: [Tasks]
       operationId: deleteTask
       summary: Move to trash (or delete forever with permanent=true)
-      x-scopes: [tasks:write]
+      x-scopes: [tasks:delete]
       parameters:
         - { name: permanent, in: query, schema: { type: boolean } }
       responses:
@@ -869,7 +915,7 @@ paths:
       tags: [Tasks]
       operationId: deleteChecklistItem
       summary: Delete a checklist item
-      x-scopes: [tasks:write]
+      x-scopes: [tasks:delete]
       responses:
         "204": { description: Deleted }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -940,7 +986,7 @@ paths:
       tags: [Labels]
       operationId: deleteLabel
       summary: Delete a label (removes it from tasks)
-      x-scopes: [tasks:write]
+      x-scopes: [tasks:delete]
       responses:
         "204": { description: Deleted }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -1109,7 +1155,7 @@ paths:
       tags: [Plans]
       operationId: setPlan
       summary: Replace a day's plan (the order of task_ids is kept)
-      x-scopes: [tasks:write]
+      x-scopes: [tasks:write, tasks:delete]
       requestBody:
         required: true
         content:
@@ -1160,7 +1206,7 @@ paths:
       tags: [Plans]
       operationId: removeFromPlan
       summary: Take a task out of a day's plan
-      x-scopes: [tasks:write]
+      x-scopes: [tasks:delete]
       responses:
         "204": { description: Removed }
   /search:
@@ -1474,7 +1520,7 @@ components:
       enum: [todo, doing, waiting, done, cancelled]
     Scope:
       type: string
-      enum: [tasks:read, tasks:write, notes:read, notes:write, export, account:read]
+      enum: [tasks:read, tasks:write, tasks:delete, notes:read, notes:write, export, account:read]
     Problem:
       type: object
       required: [type, title, status]
@@ -1587,6 +1633,15 @@ components:
         last_used_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
         token: { type: string, description: The secret. Only present in the create response. }
+    ConnectedApp:
+      type: object
+      required: [id, name, scopes, created_at, last_used_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, description: The name the app gave when it registered. Not verified. }
+        scopes: { type: array, items: { $ref: "#/components/schemas/Scope" }, description: Only tasks:read and tasks:write can be granted. }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time, nullable: true }
     AuditEvent:
       type: object
       required: [id, kind, ip, user_agent, detail, created_at]

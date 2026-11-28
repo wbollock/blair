@@ -64,7 +64,7 @@ func buildVersion() string {
 const usage = `blair — self-hosted tasks and notes
 
 Usage:
-  blair [serve]                         run the server (default)
+  blair [serve] [--mcp-allowed-cidrs LIST]   run the server (default); LIST limits /mcp and OAuth to those addresses
   blair migrate                         apply database migrations and exit
   blair user create --email E [--admin] [--name N]   (password read from stdin)
   blair user list
@@ -86,7 +86,7 @@ func main() {
 	var err error
 	switch cmd {
 	case "serve":
-		err = serve()
+		err = serve(args)
 	case "migrate":
 		err = withDB(func(ctx context.Context, _ *config.Config, _ *store.DB, _ *service.Service) error {
 			fmt.Println("migrations applied")
@@ -166,9 +166,33 @@ func withDB(fn func(context.Context, *config.Config, *store.DB, *service.Service
 	return fn(ctx, cfg, db, svc)
 }
 
-func serve() error {
+// applyServeFlags lets flags override the environment for `blair serve`.
+func applyServeFlags(cfg *config.Config, args []string) error {
+	var err error
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	cidrs := fs.String("mcp-allowed-cidrs", "", "only these comma-separated CIDRs may use /mcp and the OAuth endpoints (overrides BLAIR_MCP_ALLOWED_CIDRS; \"\" removes the limit)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "mcp-allowed-cidrs" {
+			p, perr := config.ParseCIDRs(*cidrs)
+			if perr != nil {
+				err = fmt.Errorf("--mcp-allowed-cidrs: %w", perr)
+				return
+			}
+			cfg.MCPCIDRs = p
+		}
+	})
+	return err
+}
+
+func serve(args []string) error {
 	cfg, err := config.Load()
 	if err != nil {
+		return err
+	}
+	if err := applyServeFlags(cfg, args); err != nil {
 		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -224,6 +248,10 @@ func serve() error {
 		Web:            web.FS(),
 		OpenAPIYAML:    api.YAML,
 		OpenAPIJSON:    openapiJSON,
+		BaseURL:        cfg.BaseURL,
+		MCPEnabled:     cfg.MCPEnabled,
+		OAuthRedirects: cfg.OAuthRedirects,
+		MCPCIDRs:       cfg.MCPCIDRs,
 	})
 
 	srv := &http.Server{

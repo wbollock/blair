@@ -6,13 +6,14 @@
 	import { relativeTime } from '#lib/dates.ts';
 	import ViewHeader from '#lib/components/ViewHeader.svelte';
 
-	type Tab = 'profile' | 'security' | 'tokens' | 'data' | 'admin';
+	type Tab = 'profile' | 'security' | 'tokens' | 'apps' | 'data' | 'admin';
 	let tab = $state<Tab>((page.url.searchParams.get('tab') as Tab) || 'profile');
 	const welcome = page.url.searchParams.get('welcome') === '1';
 	const tabs = $derived<[Tab, string][]>([
 		['profile', 'Profile'],
 		['security', 'Security'],
 		['tokens', 'API tokens'],
+		['apps', 'Connected apps'],
 		['data', 'Data'],
 		...(app.me?.is_admin ? [['admin', 'Admin'] as [Tab, string]] : [])
 	]);
@@ -110,7 +111,7 @@
 	let tokenName = $state('');
 	let tokenScopes = $state<Schemas['Scope'][]>(['tasks:read', 'tasks:write']);
 	let newToken = $state('');
-	const allScopes: Schemas['Scope'][] = ['tasks:read', 'tasks:write', 'notes:read', 'notes:write', 'export', 'account:read'];
+	const allScopes: Schemas['Scope'][] = ['tasks:read', 'tasks:write', 'tasks:delete', 'notes:read', 'notes:write', 'export', 'account:read'];
 	async function loadTokens() {
 		tokens = (await ok(api.GET('/me/tokens'))).data;
 	}
@@ -127,6 +128,29 @@
 	async function deleteToken(id: string) {
 		await ok(api.DELETE('/me/tokens/{id}', { params: { path: { id } } }));
 		loadTokens();
+	}
+
+	// ---- connected apps (OAuth, ADR-0016) ----
+	let apps = $state<Schemas['ConnectedApp'][]>([]);
+	async function loadApps() {
+		apps = (await ok(api.GET('/me/connected-apps'))).data;
+	}
+	let regUntil = $state('');
+	async function allowNewApp() {
+		try {
+			regUntil = (await ok(api.POST('/me/connected-apps/registration'))).expires_at;
+		} catch (e) {
+			app.toast(err(e), 'error');
+		}
+	}
+	async function disconnectApp(id: string) {
+		try {
+			await ok(api.DELETE('/me/connected-apps/{id}', { params: { path: { id } } }));
+			app.toast('Disconnected');
+		} catch (e) {
+			app.toast(err(e), 'error');
+		}
+		loadApps();
 	}
 
 	// ---- admin ----
@@ -160,6 +184,7 @@
 	$effect(() => {
 		if (tab === 'security') loadSecurity();
 		if (tab === 'tokens') loadTokens();
+		if (tab === 'apps') loadApps();
 		if (tab === 'admin') loadAdmin();
 	});
 </script>
@@ -309,6 +334,28 @@
 			{:else}
 				<p class="muted">No tokens.</p>
 			{/each}
+		</section>
+	{:else if tab === 'apps'}
+		<section>
+			<h2>Connected apps</h2>
+			<p class="muted">Apps you allowed to use your tasks, such as Claude. They can read and change tasks but can never delete anything. Disconnecting stops them immediately.</p>
+			{#each apps as a (a.id)}
+				<div class="line">
+					<div class="grow"><b>{a.name}</b><br /><span class="muted">{a.scopes.join(', ')} · connected {relativeTime(a.created_at)} · {a.last_used_at ? `used ${relativeTime(a.last_used_at)}` : 'not used yet'}</span></div>
+					<button class="btn btn-ghost btn-danger" onclick={() => disconnectApp(a.id)}>Disconnect</button>
+				</div>
+			{:else}
+				<p class="muted">No apps are connected.</p>
+			{/each}
+		</section>
+		<section>
+			<h2>Connect Claude</h2>
+			<p class="muted">New apps can only register while you allow it, so nobody else can set one up for you to approve by mistake. 2FA must be on.</p>
+			<ol class="muted">
+				<li><button class="btn" onclick={allowNewApp} disabled={!app.me?.totp_enabled}>Allow a new app for 10 minutes</button>{#if regUntil} Open until {new Date(regUntil).toLocaleTimeString()}.{/if}</li>
+				<li>In Claude: Settings → Connectors → Add custom connector → <code>{page.url.origin}/mcp</code>.</li>
+				<li>Sign in here with your password and 2FA code, check the app name, and choose Allow.</li>
+			</ol>
 		</section>
 	{:else if tab === 'data'}
 		<section>

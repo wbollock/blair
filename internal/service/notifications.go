@@ -33,6 +33,9 @@ var securityText = map[string]string{
 	"2fa.disabled":             "Two-factor authentication was turned off.",
 	"2fa.recovery_regenerated": "New 2FA recovery codes were generated. The old ones no longer work.",
 	"token.created":            "A new API token was created.",
+	"oauth.client_registered":  "An app registered itself with your account. If you did not just add one in Claude, ignore any sign-in link for it; it cannot connect without your password and 2FA.",
+	"oauth.authorize":          "An app was connected to your account.",
+	"oauth.refresh_reuse":      "A connected app reused an old token, so its access was revoked.",
 }
 
 // notifySecurity adds a security notification for an audit event when it is
