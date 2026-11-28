@@ -419,6 +419,16 @@ func (s *Service) CompleteMFA(ctx context.Context, preAuth *Session, code, recov
 	return tok, u, err
 }
 
+// VerifySecondFactor checks a TOTP or recovery code for a user who has just passed the
+// password step outside the browser-session flow (the OAuth authorize page).
+func (s *Service) VerifySecondFactor(ctx context.Context, userID, code, recovery string) error {
+	u, err := s.userByID(ctx, s.db.R, userID)
+	if err != nil || u.Disabled {
+		return ErrUnauthorized
+	}
+	return s.verifySecondFactor(ctx, u, code, recovery)
+}
+
 func hashRecovery(code string) string {
 	sum := sha256.Sum256([]byte("blair-recovery:" + auth.NormalizeRecoveryCode(code)))
 	return hex.EncodeToString(sum[:])
@@ -950,5 +960,5 @@ func (s *Service) Housekeeping(ctx context.Context) error {
 	_, err4 := s.db.W.ExecContext(ctx, `DELETE FROM notes WHERE deleted_at IS NOT NULL AND deleted_at <= ?`, purge)
 	cutoff := store.FormatTime(s.clock().Add(-365 * 24 * time.Hour))
 	_, err5 := s.db.W.ExecContext(ctx, `DELETE FROM audit_events WHERE created_at <= ?`, cutoff)
-	return errors.Join(err1, err2, err3, err4, err5)
+	return errors.Join(err1, err2, err3, err4, err5, s.oauthHousekeeping(ctx, now))
 }
