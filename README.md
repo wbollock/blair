@@ -45,6 +45,10 @@ Everything the UI does goes through the API. Docs are at `/api/docs`, and the
 spec is [`api/openapi.yaml`](api/openapi.yaml). There are no importers: give an
 agent the spec and your old app's export, and let it use the batch endpoint.
 
+`blairctl` is a small command line client for the API. Set `BLAIR_URL` and
+`BLAIR_TOKEN` (a token with `tasks:read` and `tasks:write`), then run
+`go run ./cmd/blairctl help`.
+
 ## Security
 
 Accounts use argon2id passwords, TOTP 2FA and scoped API tokens. Registration
