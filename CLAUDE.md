@@ -101,6 +101,7 @@ built from this repo; Caddy site in `~/docker/caddy/sites.caddy`).
 
 ```
 cmd/blair/            main + CLI subcommands
+cmd/blairctl/         API client CLI (tasks, projects)
 internal/config/      env config
 internal/httpapi/     chi handlers, middleware, SPA + docs serving, contract tests
 internal/auth/        argon2id, TOTP, tokens, secret box
