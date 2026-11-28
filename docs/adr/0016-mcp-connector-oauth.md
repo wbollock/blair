@@ -39,7 +39,11 @@ it a way to destroy data or to reach the rest of the API.
   off or resetting it, disconnects every app.
 - **Optional address list.** `BLAIR_MCP_ALLOWED_CIDRS` limits `/mcp`, `/oauth/token`,
   `/oauth/register`, `/oauth/revoke` and the discovery documents to given addresses. The
-  sign-in page stays open.
+  sign-in page stays open. There is no built-in list: Anthropic publishes its outbound ranges
+  (`160.79.104.0/21` and `153.61.208.0/20` when last read, 2026-11-28; see its IP addresses page) and
+  says only that they "will not change without notice". Leave this unset if you would rather not
+  risk a silent break when they move; tokens still protect every endpoint. Refused requests log
+  `connector address gate refused a request` with the address, which is how you would notice.
 - **Off by default.** `BLAIR_MCP_ENABLED=false` mounts nothing (404). The
   Connected apps page and revocation still work when it is off.
 - **A separate Origin check on `/mcp`** accepts no browser origin except
